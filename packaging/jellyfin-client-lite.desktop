@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Jellyfin Client Lite
+GenericName=Music Player
+GenericName[de]=Musikplayer
+Comment=Tiny terminal music player that shuffles your whole Jellyfin library
+Comment[de]=Kleiner Terminal-Musikplayer, spielt die ganze Jellyfin-Bibliothek zufällig ab
+Exec=jellyfin-client-lite
+Icon=jellyfin-client-lite
+Terminal=true
+Categories=AudioVideo;Audio;Player;
+StartupNotify=false

@@ -1,0 +1,3 @@
+# cmd.exe braucht Windows-Zeilenenden - unverändert speichern, damit sie
+# auch im ZIP-Download von GitHub sicher erhalten bleiben
+*.cmd -text

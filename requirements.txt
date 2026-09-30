@@ -1,0 +1,2 @@
+textual>=2.1  # getestet mit 2.1.2 (Debian 13) und 8.2.8
+requests>=2.31

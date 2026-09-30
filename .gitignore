@@ -1,0 +1,11 @@
+# Enthält dein Jellyfin-Passwort - niemals hochladen
+config.json
+
+__pycache__/
+*.pyc
+venv/
+.venv/
+dist/
+*.deb
+# unter Windows daneben entpacktes mpv
+/mpv*

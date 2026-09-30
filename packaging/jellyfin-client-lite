@@ -1,0 +1,11 @@
+#!/bin/sh
+python3 /usr/lib/jellyfin-client-lite/run.py "$@"
+status=$?
+if [ "$status" -ne 0 ]; then
+    # Aus dem Startmenü gestartet würde sich das Fenster sonst sofort schließen
+    echo
+    echo "jellyfin-client-lite wurde mit einem Fehler beendet (Exit-Code $status)."
+    echo "Drücke Enter zum Schließen ..."
+    read _dummy
+fi
+exit "$status"
