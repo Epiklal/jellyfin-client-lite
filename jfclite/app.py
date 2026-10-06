@@ -6,7 +6,7 @@ from rich.text import Text
 from textual.actions import SkipAction
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -26,7 +26,16 @@ from . import NAME
 from .client import JellyfinClient, Track, shuffled, sorted_tracks
 from .discord import DiscordPresence
 from .player import MPVPlayer
-from .widgets import Control, SeekBar, TrackTable, VolumeBar, typical_width
+from .widgets import (
+    Control,
+    CoverArt,
+    SeekBar,
+    TrackTable,
+    VolumeBar,
+    cover_supported,
+    render_cover,
+    typical_width,
+)
 
 ACCENT = "#e63946"  # rot
 
@@ -62,10 +71,33 @@ Screen {{
     background: transparent;
 }}
 
-#queue-panel {{
+#side {{
     width: 25%;
     min-width: 26;
     max-width: 40;
+}}
+
+#side.with-lyrics {{
+    width: 35%;
+    min-width: 32;
+    max-width: 56;
+}}
+
+#lyrics-panel {{
+    display: none;
+    height: 2fr;
+    border: round {ACCENT};
+    border-title-color: {ACCENT};
+    background: transparent;
+    padding: 0 1;
+}}
+
+#side.with-lyrics #lyrics-panel {{
+    display: block;
+}}
+
+#queue-panel {{
+    height: 1fr;
     border: round {ACCENT};
     border-title-color: {ACCENT};
     background: transparent;
@@ -91,6 +123,26 @@ DataTable {{
 
 DataTable > .datatable--cursor {{
     background: {ACCENT} 30%;
+}}
+
+#np-info {{
+    width: 1fr;
+}}
+
+CoverArt {{
+    display: none;
+}}
+
+#now-playing.with-cover {{
+    height: 8;
+}}
+
+#now-playing.with-cover CoverArt {{
+    display: block;
+}}
+
+#now-playing.with-cover #np-info {{
+    align-vertical: middle;
 }}
 
 #now-playing {{
@@ -189,6 +241,12 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
                 yield Label("Autoplay (beim Start sofort abspielen)")
                 yield Switch(self._settings["autoplay"], id="set-autoplay")
             with Horizontal():
+                yield Label("Cover neben dem Titel anzeigen")
+                yield Switch(self._settings["show_cover"], id="set-cover")
+            with Horizontal():
+                yield Label("Songtext anzeigen")
+                yield Switch(self._settings["show_lyrics"], id="set-lyrics")
+            with Horizontal():
                 yield Label("Beim Start: Reihenfolge")
                 yield Select(
                     START_MODES,
@@ -205,6 +263,8 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
             self.dismiss(
                 {
                     "autoplay": self.query_one("#set-autoplay", Switch).value,
+                    "show_cover": self.query_one("#set-cover", Switch).value,
+                    "show_lyrics": self.query_one("#set-lyrics", Switch).value,
                     "start_mode": self.query_one("#set-start-mode", Select).value,
                 }
             )
@@ -225,6 +285,8 @@ class JellyfinClientLite(App):
         ("r", "reshuffle", "Neu mischen"),
         # priority: sonst landet der "/" nach dem Fokuswechsel noch im Suchfeld
         Binding("slash", "search", "Suche", priority=True),
+        ("l", "toggle_lyrics", "Songtext"),
+        ("c", "toggle_cover", "Cover"),
         ("s", "settings", "Einstellungen"),
         Binding("escape", "close_search", "Suche schließen", show=False),
         ("plus", "vol_up", "Lauter"),
@@ -261,6 +323,10 @@ class JellyfinClientLite(App):
         self._ordered_shuffle = True
         self.search_active = False  # Queue besteht nur aus Suchtreffern
         self._search_timer = None
+        self._extras_for = ""  # Titel, für den Cover/Songtext geladen (werden)
+        self._covers: dict = {}  # Cover-ID -> fertig gerendertes Bild (None = keins)
+        self._lyrics: list = []  # (Startzeit oder None, Text)
+        self._lyric_line = -1
 
     @property
     def main(self):
@@ -285,28 +351,37 @@ class JellyfinClientLite(App):
                 table = TrackTable(id="tracks", cursor_type="row")
                 table.border_subtitle = "Klick oder Enter = abspielen"
                 yield table
-            with Vertical(id="queue-panel"):
-                yield Label("Queue", id="queue-label")
-                yield ListView(id="queue-list")
-        with Vertical(id="now-playing"):
-            yield Static("Lade Bibliothek ...", id="np-title", markup=False)
-            yield Static("", id="np-sub", markup=False)
-            yield SeekBar(ACCENT, id="np-progress")
-            with Horizontal(id="controls"):
-                yield Control("⏮", "prev_track")
-                yield Control("⏸", "toggle_pause", id="btn-play")
-                yield Control("⏭", "next_track")
-                yield Control("⇄ Mischen", "reshuffle")
-                yield Static(id="controls-spacer")
-                yield Control("−", "vol_down")
-                yield VolumeBar(ACCENT)
-                yield Control("+", "vol_up")
+            with Vertical(id="side"):
+                with Vertical(id="queue-panel"):
+                    yield Label("Queue", id="queue-label")
+                    yield ListView(id="queue-list")
+                with VerticalScroll(id="lyrics-panel"):
+                    yield Static("", id="lyrics-text", markup=False)
+        with Horizontal(id="now-playing"):
+            yield CoverArt(id="cover")
+            with Vertical(id="np-info"):
+                yield Static("Lade Bibliothek ...", id="np-title", markup=False)
+                yield Static("", id="np-sub", markup=False)
+                yield SeekBar(ACCENT, id="np-progress")
+                with Horizontal(id="controls"):
+                    yield Control("⏮", "prev_track")
+                    yield Control("⏸", "toggle_pause", id="btn-play")
+                    yield Control("⏭", "next_track")
+                    yield Control("⇄ Mischen", "reshuffle")
+                    yield Static(id="controls-spacer")
+                    yield Control("−", "vol_down")
+                    yield VolumeBar(ACCENT)
+                    yield Control("+", "vol_up")
         yield Footer()
 
     def on_mount(self) -> None:
         table = self.main.query_one("#tracks", DataTable)
         table.add_columns("Titel", "Interpret", "Album", "Dauer")
         self._update_title()
+        self.main.query_one("#lyrics-panel").border_title = "Songtext"
+        if self.config.get("show_cover", True) and not cover_supported():
+            self.notify("Für Cover fehlt Pillow:  pip install pillow", severity="warning")
+        self._apply_view()
         self.main.query_one("#np-title", Static).update("Lade Bibliothek ...")
         self.main.query_one("#np-sub", Static).update(
             "Kann bei großen Bibliotheken oder über VPN/Tunnel einen Moment dauern."
@@ -474,6 +549,7 @@ class JellyfinClientLite(App):
         if self.shown is self.queue:
             self.main.query_one("#tracks", DataTable).move_cursor(row=index)
         self._refresh_queue_panel()
+        self._load_extras()
 
     def _play_next(self) -> None:
         if self.current_index + 1 >= len(self.queue):
@@ -501,6 +577,7 @@ class JellyfinClientLite(App):
         if self.player is None:
             return
         self._refresh_status()
+        self._sync_lyrics()
         if self.player.is_idle and self.current_index >= 0:
             self._play_next()
             return
@@ -573,6 +650,133 @@ class JellyfinClientLite(App):
         self._reshuffle(self.all_tracks if self.search_active else self.queue, shuffle=True)
         self._play_next()
 
+    @property
+    def show_cover(self) -> bool:
+        return bool(self.config.get("show_cover", True)) and cover_supported()
+
+    @property
+    def show_lyrics(self) -> bool:
+        return bool(self.config.get("show_lyrics", True))
+
+    def _apply_view(self) -> None:
+        """Cover und Songtext je nach Einstellung ein- bzw. ausblenden."""
+        self.main.query_one("#now-playing").set_class(self.show_cover, "with-cover")
+        self.main.query_one("#side").set_class(self.show_lyrics, "with-lyrics")
+        self._load_extras(force=True)
+
+    def _toggle_setting(self, key: str) -> None:
+        self.config[key] = not self.config.get(key, True)
+        try:
+            if self._save_config:
+                self._save_config()
+        except OSError as exc:
+            self.notify(f"Speichern fehlgeschlagen: {exc}", severity="error")
+        self._apply_view()
+
+    def action_toggle_lyrics(self) -> None:
+        if not isinstance(self.screen, SettingsScreen):
+            self._toggle_setting("show_lyrics")
+
+    def action_toggle_cover(self) -> None:
+        if isinstance(self.screen, SettingsScreen):
+            return
+        if not cover_supported():
+            self.notify("Für Cover fehlt Pillow:  pip install pillow", severity="warning")
+            return
+        self._toggle_setting("show_cover")
+
+    def _load_extras(self, force: bool = False) -> None:
+        """Cover und Songtext des laufenden Titels holen (nur was sichtbar ist)."""
+        if not 0 <= self.current_index < len(self.queue):
+            return
+        track = self.queue[self.current_index]
+        if track.id == self._extras_for and not force:
+            return
+        self._extras_for = track.id
+        self._lyrics, self._lyric_line = [], -1
+        if self.show_lyrics:
+            self._show_lyrics_text("Lade Songtext ...")
+            self.run_worker(
+                lambda: self._fetch_lyrics(track), thread=True, exit_on_error=False,
+                group="lyrics", exclusive=True,
+            )
+        if self.show_cover:
+            cover_id = track.album_id or track.id
+            if cover_id in self._covers:
+                self.main.query_one(CoverArt).set_art(self._covers[cover_id])
+            else:
+                self.main.query_one(CoverArt).set_art(None)
+                self.run_worker(
+                    lambda: self._fetch_cover(track, cover_id), thread=True,
+                    exit_on_error=False, group="cover", exclusive=True,
+                )
+
+    def _is_current(self, track: Track) -> bool:
+        return 0 <= self.current_index < len(self.queue) and self.queue[self.current_index].id == track.id
+
+    def _fetch_cover(self, track: Track, cover_id: str) -> None:
+        try:
+            data = self.client.fetch_cover(cover_id)
+        except Exception:
+            return  # dann eben ohne Cover
+        art = render_cover(data) if data else None
+        self.call_from_thread(self._on_cover, track, cover_id, art)
+
+    def _on_cover(self, track: Track, cover_id: str, art) -> None:
+        if len(self._covers) >= 16:
+            self._covers.pop(next(iter(self._covers)))
+        self._covers[cover_id] = art
+        if self._is_current(track):
+            self.main.query_one(CoverArt).set_art(art)
+
+    def _fetch_lyrics(self, track: Track) -> None:
+        try:
+            lines = self.client.fetch_lyrics(track.id)
+        except Exception:
+            lines = []
+        self.call_from_thread(self._on_lyrics, track, lines)
+
+    def _on_lyrics(self, track: Track, lines: list) -> None:
+        if not self._is_current(track):
+            return
+        self._lyrics, self._lyric_line = lines, -1
+        if not lines:
+            self._show_lyrics_text("Kein Songtext vorhanden.")
+            return
+        self._render_lyrics()
+        self._sync_lyrics()
+
+    def _show_lyrics_text(self, message: str) -> None:
+        self.main.query_one("#lyrics-text", Static).update(Text(message, style="dim"))
+
+    def _render_lyrics(self) -> None:
+        text = Text()
+        for i, (_, line) in enumerate(self._lyrics):
+            if i:
+                text.append("\n")
+            text.append(line, style=f"bold {ACCENT}" if i == self._lyric_line else "")
+        self.main.query_one("#lyrics-text", Static).update(text)
+
+    def _sync_lyrics(self) -> None:
+        """Bei zeitgenau hinterlegtem Songtext die aktuelle Zeile hervorheben
+        und in den sichtbaren Bereich scrollen."""
+        if not (self.show_lyrics and self._lyrics and self.player):
+            return
+        if any(start is None for start, _ in self._lyrics):
+            return
+        pos = self.player.position
+        line = -1
+        for i, (start, _) in enumerate(self._lyrics):
+            if start <= pos:
+                line = i
+            else:
+                break
+        if line != self._lyric_line:
+            self._lyric_line = line
+            self._render_lyrics()
+            panel = self.main.query_one("#lyrics-panel", VerticalScroll)
+            panel.scroll_to(y=max(0, line - panel.size.height // 2), animate=False)
+
     def action_search(self) -> None:
         if not self.all_tracks or isinstance(self.screen, SettingsScreen):
             return
@@ -636,6 +840,8 @@ class JellyfinClientLite(App):
             return
         current = {
             "autoplay": self.config.get("autoplay", True),
+            "show_cover": self.config.get("show_cover", True),
+            "show_lyrics": self.config.get("show_lyrics", True),
             "start_mode": self.config.get("start_mode", "shuffle"),
         }
 
@@ -649,7 +855,8 @@ class JellyfinClientLite(App):
             except OSError as exc:
                 self.notify(f"Speichern fehlgeschlagen: {exc}", severity="error")
                 return
-            self.notify("Gespeichert (gilt ab dem nächsten Start).")
+            self._apply_view()
+            self.notify("Gespeichert (Autoplay und Reihenfolge gelten ab dem nächsten Start).")
 
         self.push_screen(SettingsScreen(current), done)
 

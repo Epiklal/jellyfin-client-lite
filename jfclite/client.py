@@ -259,6 +259,37 @@ class JellyfinClient:
         resp.raise_for_status()
         return resp.json().get("TotalRecordCount", 0)
 
+    def fetch_cover(self, item_id: str) -> Optional[bytes]:
+        """Kleines Cover (Album oder Titel), None wenn es keins gibt. Der Token
+        geht als Header mit, nicht in der Adresse."""
+        resp = self._session.get(
+            f"{self.server_url}/Items/{item_id}/Images/Primary",
+            params={"maxWidth": 96, "maxHeight": 96, "quality": 80},
+            timeout=10,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.content
+
+    def fetch_lyrics(self, track_id: str) -> List[Tuple[Optional[float], str]]:
+        """Songtext, den der Server zum Titel hinterlegt hat (Zeilen mit Startzeit
+        in Sekunden, falls synchronisiert). Leer, wenn es keinen gibt."""
+        resp = self._session.get(f"{self.server_url}/Audio/{track_id}/Lyrics", timeout=10)
+        if resp.status_code in (404, 400):
+            return []
+        resp.raise_for_status()
+        lines = []
+        for line in resp.json().get("Lyrics", [])[:1000]:
+            start = line.get("Start")
+            lines.append(
+                (
+                    start / 10_000_000 if start is not None else None,
+                    _UNSAFE_CHARS.sub(" ", line.get("Text") or "").strip(),
+                )
+            )
+        return lines
+
     def stream_url(self, track_id: str) -> str:
         """Direkter, nicht transcodierter Stream = minimale Serverlast/CPU.
 

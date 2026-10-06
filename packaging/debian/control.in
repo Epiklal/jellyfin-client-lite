@@ -4,7 +4,7 @@ Section: sound
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.10), python3-textual (>= 2.1), python3-requests, mpv
-Recommends: mpv-mpris, playerctl
+Recommends: mpv-mpris, playerctl, python3-pil
 Conflicts: jellyfin-tui-lite
 Replaces: jellyfin-tui-lite
 Maintainer: ketchupboy

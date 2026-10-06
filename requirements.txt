@@ -1,2 +1,3 @@
 textual>=2.1  # getestet mit 2.1.2 (Debian 13) und 8.2.8
 requests>=2.31
+pillow>=10.0  # optional: nur für die Cover-Anzeige

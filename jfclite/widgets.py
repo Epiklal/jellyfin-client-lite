@@ -6,6 +6,8 @@ gezeichnet, und nur dann, wenn sich der angezeigte Wert tatsächlich ändert.
 
 from __future__ import annotations
 
+import importlib.util
+import io
 from typing import Iterable, Optional
 
 from rich.cells import cell_len
@@ -227,3 +229,53 @@ class VolumeBar(Widget):
     async def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
         event.stop()
         await self.app.run_action("vol_down")
+
+
+COVER_COLS, COVER_ROWS = 12, 6  # Zellen sind etwa doppelt so hoch wie breit
+
+
+def cover_supported() -> bool:
+    """Cover brauchen Pillow zum Dekodieren (optional installiert)."""
+    return importlib.util.find_spec("PIL") is not None
+
+
+def render_cover(data: bytes) -> Optional[Text]:
+    """Bild als Text aus "▀"-Zeichen: Vordergrund = obere, Hintergrund = untere
+    Pixelhälfte, also zwei Bildzeilen pro Terminalzeile. None bei defekten Daten."""
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        img = img.resize((COVER_COLS, COVER_ROWS * 2), Image.LANCZOS)
+    except Exception:
+        return None
+    px = img.load()
+    text = Text(no_wrap=True)
+    for y in range(COVER_ROWS):
+        for x in range(COVER_COLS):
+            top, bottom = px[x, 2 * y], px[x, 2 * y + 1]
+            text.append("▀", style=f"rgb({top[0]},{top[1]},{top[2]}) on rgb({bottom[0]},{bottom[1]},{bottom[2]})")
+        if y < COVER_ROWS - 1:
+            text.append("\n")
+    return text
+
+
+class CoverArt(Widget):
+    DEFAULT_CSS = f"""
+    CoverArt {{
+        width: {COVER_COLS};
+        height: {COVER_ROWS};
+        margin-right: 2;
+    }}
+    """
+
+    def __init__(self, *, id: Optional[str] = None):
+        super().__init__(id=id)
+        self._art: Optional[Text] = None
+
+    def set_art(self, art: Optional[Text]) -> None:
+        self._art = art
+        self.refresh()
+
+    def render(self):
+        return self._art if self._art is not None else Text("")

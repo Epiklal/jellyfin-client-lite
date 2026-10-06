@@ -26,6 +26,8 @@ interface plus ~70 MB for mpv, and about 0.3 % of one CPU core while playing.
   and only reloads when something changed on the server
 - can show what you're listening to in Discord (optional)
 
+- shows the album cover next to the track name and the lyrics stored on your
+  server (synced lyrics highlight the current line); both can be switched off
 - search (`/`) across title, artist and album, and a settings dialog (`s`)
 
 What it doesn't do: browsing albums or playlists. That's on purpose, there
@@ -140,11 +142,17 @@ Press `s` in the player, or edit the config:
 
 ```json
 "autoplay": true,
-"start_mode": "shuffle"
+"start_mode": "shuffle",
+"show_cover": true,
+"show_lyrics": true
 ```
 
 - `autoplay`: start playing right away. If off, the library loads and waits;
   `Space` or `Enter` on a track starts it.
+- `show_cover` / `show_lyrics`: also toggled with `c` / `l`. Lyrics come from
+  your Jellyfin server (it has to have them); the cover needs Pillow
+  (`pip install pillow`, the `.deb` recommends `python3-pil`) and a terminal
+  with true color.
 - `start_mode`: `"shuffle"` or `"sorted"` (by artist, album, title) for the
   order the list has at startup. `r` always reshuffles.
 
@@ -160,6 +168,8 @@ brings back the whole library, continuing with the current track.
 | `←` / `→` | seek 10 s |
 | `r` | reshuffle |
 | `/` | search (live filter; `Enter` jumps to the results, `Esc` closes) |
+| `l` | show / hide lyrics |
+| `c` | show / hide cover |
 | `s` | settings |
 | `+` / `-` | volume (`=` works too) |
 | `↑` `↓` `Enter` | pick a track from the list |

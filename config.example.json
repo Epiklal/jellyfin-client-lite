@@ -4,6 +4,8 @@
   "password": "DEIN_JELLYFIN_PASSWORT",
   "autoplay": true,
   "start_mode": "shuffle",
+  "show_cover": true,
+  "show_lyrics": true,
   "discord_client_id": "",
   "public_url": ""
 }
