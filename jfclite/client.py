@@ -67,6 +67,9 @@ class JellyfinClient:
         self.server_url = server_url.rstrip("/")
         self.api_key: Optional[str] = None  # wird nach login() gesetzt (Access Token)
         self.user_id: Optional[str] = None
+        # Quick-Connect-Token liegen in der Config und müssen das Programmende
+        # überleben - nur Token aus Benutzername + Passwort werden abgemeldet.
+        self.keep_token = False
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -88,10 +91,61 @@ class JellyfinClient:
         if resp.status_code == 401:
             raise RuntimeError("Anmeldung fehlgeschlagen: Benutzername oder Passwort falsch.")
         resp.raise_for_status()
-        data = resp.json()
+        self._set_token(resp.json())
+
+    def _set_token(self, data: dict) -> None:
         self.api_key = data["AccessToken"]
         self.user_id = data["User"]["Id"]
         self._session.headers.update({"X-Emby-Token": self.api_key})
+
+    def server_info(self) -> dict:
+        """Name und Version des Servers (ohne Anmeldung) - zugleich ein Test,
+        ob die Adresse stimmt."""
+        resp = self._session.get(f"{self.server_url}/System/Info/Public", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def login_with_token(self, token: str) -> None:
+        """Übernimmt einen gespeicherten Token (Quick Connect) und prüft ihn."""
+        self._session.headers.update({"X-Emby-Token": token})
+        resp = self._session.get(f"{self.server_url}/Users/Me", timeout=10)
+        if resp.status_code == 401:
+            self._session.headers.pop("X-Emby-Token", None)
+            raise RuntimeError(
+                "Die gespeicherte Anmeldung ist abgelaufen oder wurde widerrufen."
+            )
+        resp.raise_for_status()
+        self.api_key = token
+        self.user_id = resp.json()["Id"]
+        self.keep_token = True
+
+    def quick_connect_start(self) -> Tuple[str, str]:
+        """Startet Quick Connect: (Code zum Eingeben in Jellyfin, Geheimnis)."""
+        resp = self._session.post(f"{self.server_url}/QuickConnect/Initiate", timeout=10)
+        if resp.status_code in (400, 401, 403):
+            raise RuntimeError("Quick Connect ist auf diesem Server nicht aktiviert.")
+        resp.raise_for_status()
+        data = resp.json()
+        return data["Code"], data["Secret"]
+
+    def quick_connect_authorized(self, secret: str) -> bool:
+        resp = self._session.get(
+            f"{self.server_url}/QuickConnect/Connect",
+            params={"secret": secret},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return bool(resp.json().get("Authenticated"))
+
+    def quick_connect_login(self, secret: str) -> None:
+        resp = self._session.post(
+            f"{self.server_url}/Users/AuthenticateWithQuickConnect",
+            json={"Secret": secret},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        self._set_token(resp.json())
+        self.keep_token = True
 
     def resolve_user_id(self) -> str:
         if not self.user_id:
@@ -219,7 +273,7 @@ class JellyfinClient:
     def logout(self) -> None:
         """Meldet den Token beim Server ab - sonst bliebe nach jedem Start ein
         weiterer, unbegrenzt gültiger Token auf dem Server zurück."""
-        if not self.api_key:
+        if not self.api_key or self.keep_token:
             return
         try:
             self._session.post(f"{self.server_url}/Sessions/Logout", timeout=3)
@@ -232,3 +286,7 @@ def shuffled(tracks: List[Track]) -> List[Track]:
     copy = list(tracks)
     random.shuffle(copy)
     return copy
+
+
+def sorted_tracks(tracks: List[Track]) -> List[Track]:
+    return sorted(tracks, key=lambda t: (t.artist.casefold(), t.album.casefold(), t.title.casefold()))

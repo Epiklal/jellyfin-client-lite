@@ -2,6 +2,8 @@
   "server_url": "http://127.0.0.1:8096",
   "username": "DEIN_JELLYFIN_BENUTZERNAME",
   "password": "DEIN_JELLYFIN_PASSWORT",
+  "autoplay": true,
+  "start_mode": "shuffle",
   "discord_client_id": "",
   "public_url": ""
 }

@@ -26,8 +26,10 @@ interface plus ~70 MB for mpv, and about 0.3 % of one CPU core while playing.
   and only reloads when something changed on the server
 - can show what you're listening to in Discord (optional)
 
-What it doesn't do: browsing albums, playlists, search. That's on purpose,
-there are bigger clients for that.
+- search (`/`) across title, artist and album, and a settings dialog (`s`)
+
+What it doesn't do: browsing albums or playlists. That's on purpose, there
+are bigger clients for that.
 
 ## Install
 
@@ -100,9 +102,18 @@ best.
 
 Tested on Windows 11 with mpv from winget, so far only in a VM.
 
+## First start
+
+If there's no config yet, the player asks for your server address (it checks
+that it's reachable and shows the server's name) and then lets you log in
+either with username and password or with **Quick Connect**: you get a code
+and confirm it in a Jellyfin that's already logged in (user menu → Quick
+Connect). With Quick Connect no password is stored, only an access token.
+Run `python run.py --setup` to do this again later.
+
 ## Config
 
-Create `~/.config/jellyfin-client-lite/config.json`
+You can also write the file by hand. Create `~/.config/jellyfin-client-lite/config.json`
 (Windows: `%APPDATA%\jellyfin-client-lite\config.json`):
 
 ```json
@@ -123,6 +134,23 @@ again when you quit.
 If JSON isn't your thing: every line except the last one before `}` needs a
 comma at the end. The player tells you the line number if one is missing.
 
+## Settings
+
+Press `s` in the player, or edit the config:
+
+```json
+"autoplay": true,
+"start_mode": "shuffle"
+```
+
+- `autoplay`: start playing right away. If off, the library loads and waits;
+  `Space` or `Enter` on a track starts it.
+- `start_mode`: `"shuffle"` or `"sorted"` (by artist, album, title) for the
+  order the list has at startup. `r` always reshuffles.
+
+Picking a search result plays through the results; closing the search
+brings back the whole library, continuing with the current track.
+
 ## Keys
 
 | Key | |
@@ -131,6 +159,8 @@ comma at the end. The player tells you the line number if one is missing.
 | `n` / `p` | next / previous track |
 | `←` / `→` | seek 10 s |
 | `r` | reshuffle |
+| `/` | search (live filter; `Enter` jumps to the results, `Esc` closes) |
+| `s` | settings |
 | `+` / `-` | volume (`=` works too) |
 | `↑` `↓` `Enter` | pick a track from the list |
 | `q` | quit |
@@ -211,7 +241,7 @@ The package ends up in `dist/`.
 
 ## Credits
 
-The look is borrowed from [jellyfin-tui](https://github.com/dhonus/jellyfin-tui),
+The look is borrowed from [jellyfin-tui](https://github.com/Epiklal/jellyfin-client-lite),
 which is the one to use if you want a full-featured client.
 
 ## License

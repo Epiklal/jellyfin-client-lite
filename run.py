@@ -141,13 +141,14 @@ def packages_hint() -> Optional[str]:
 def main() -> None:
     migrate_old_dirs()
     config = load_config()
+    force_setup = "--setup" in sys.argv
     mpv_path = (config or {}).get("mpv_path")
     mpv = find_mpv(mpv_path)
     # Alles auf einmal melden statt Stück für Stück
     problems = [
         hint
         for hint in (
-            None if config is not None else config_hint(),
+            None if config is not None or sys.stdin.isatty() else config_hint(),
             None if mpv else mpv_hint(mpv_path),
             packages_hint(),
         )
@@ -162,16 +163,28 @@ def main() -> None:
 
     from jfclite.client import JellyfinClient
     from jfclite.app import JellyfinClientLite
+    from jfclite.setup import run_setup, save_config
+
+    config_path = find_config_path()
+    if config is None or force_setup:
+        # Erster Start (oder --setup): Server und Anmeldung abfragen
+        config = run_setup(config)
+        save_config(config_path, config)
+        print(f"Gespeichert in {config_path}\n")
 
     client = JellyfinClient(server_url=config["server_url"])
     try:
-        client.login(config["username"], config["password"])
+        if config.get("access_token"):
+            client.login_with_token(config["access_token"])
+        else:
+            client.login(config["username"], config["password"])
     except (requests.ConnectionError, requests.Timeout):
         print(f"Jellyfin unter {config['server_url']} ist nicht erreichbar.")
         print("Stimmt die Adresse in der Konfiguration, und läuft der Server?")
         sys.exit(1)
     except Exception as exc:
         print(f"Anmeldung bei Jellyfin fehlgeschlagen: {exc}")
+        print("Neu einrichten mit:  python run.py --setup")
         sys.exit(1)
 
     presence = None
@@ -182,7 +195,12 @@ def main() -> None:
             config["discord_client_id"], cover_base_url=config.get("public_url")
         )
 
-    app = JellyfinClientLite(client, presence=presence)
+    app = JellyfinClientLite(
+        client,
+        presence=presence,
+        config=config,
+        save_config=lambda: save_config(config_path, config),
+    )
     try:
         app.run()
     except Exception:
