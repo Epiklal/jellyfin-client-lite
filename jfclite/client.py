@@ -44,7 +44,9 @@ def _auth_header(token: Optional[str] = None) -> str:
 # Bibliothek auszuliefern (3000 Titel = ~10 s) - aus dem Cache startet die
 # Wiedergabe sofort, neu geladen wird nur, wenn sich etwas geändert hat.
 CACHE_PATH = CACHE_DIR / "library.json"
-CACHE_VERSION = 2  # erhöhen, wenn sich die Felder von Track ändern
+# erhöhen, wenn sich die Felder von Track ändern - oder wie sie befüllt werden
+# (3: Interpret kam bei Titeln ohne "Artists" fälschlich als "Unbekannt")
+CACHE_VERSION = 3
 
 # Steuerzeichen in Tags (z.B. ESC) gingen sonst ungefiltert ans Terminal: eine
 # präparierte Datei könnte Fenstertitel oder Zwischenablage (OSC 52)
@@ -196,9 +198,8 @@ class JellyfinClient:
                     Track(
                         id=item["Id"],
                         title=item.get("Name", "Unbekannt"),
-                        artist=item.get("AlbumArtist") or item.get("Artists", ["Unbekannt"])[0]
-                        if item.get("Artists")
-                        else "Unbekannt",
+                        artist=item.get("AlbumArtist")
+                        or (item.get("Artists") or ["Unbekannt"])[0],
                         album=item.get("Album", ""),
                         duration_ticks=item.get("RunTimeTicks", 0) or 0,
                         album_id=item.get("AlbumId", ""),

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from jfclite import CACHE_DIR, CONFIG_DIR, STATE_DIR
+from jfclite import CACHE_DIR, CONFIG_DIR, NAME, STATE_DIR
 from jfclite.player import MPVPlayer, find_mpv
 
 OLD_NAME = "jellyfin-tui-lite"  # Name bis 0.1.x
@@ -138,6 +138,16 @@ def packages_hint() -> Optional[str]:
     return "\n".join(lines)
 
 
+def setup_command() -> str:
+    """Wie man die Einrichtung neu startet - je nachdem, wie installiert."""
+    if WINDOWS:
+        return f"{NAME}.cmd --setup"
+    if HERE == Path("/usr/lib") / NAME:  # .deb
+        return f"{NAME} --setup"
+    python = ".venv/bin/python" if (HERE / ".venv").is_dir() else "python3"
+    return f"{python} run.py --setup   (in {HERE})"
+
+
 def main() -> None:
     migrate_old_dirs()
     config = load_config()
@@ -184,7 +194,7 @@ def main() -> None:
         sys.exit(1)
     except Exception as exc:
         print(f"Anmeldung bei Jellyfin fehlgeschlagen: {exc}")
-        print("Neu einrichten mit:  python run.py --setup")
+        print(f"Neu einrichten mit:  {setup_command()}")
         sys.exit(1)
 
     presence = None

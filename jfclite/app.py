@@ -38,6 +38,9 @@ from .widgets import (
 )
 
 ACCENT = "#e63946"  # rot
+# So viele Titel dürfen hintereinander scheitern, bevor die Wiedergabe anhält -
+# sonst rauscht der Player bei einem Server-Neustart durch die ganze Bibliothek.
+MAX_FAILURES = 5
 
 CSS = f"""
 Screen {{
@@ -316,6 +319,7 @@ class JellyfinClientLite(App):
         self.player: Optional[MPVPlayer] = None
         self.queue: List[Track] = []
         self.current_index: int = -1
+        self._halted = False  # nach zu vielen Ladefehlern angehalten
         self.config = config if config is not None else {}
         self._save_config = save_config
         self.all_tracks: List[Track] = []
@@ -524,6 +528,7 @@ class JellyfinClientLite(App):
         if not (0 <= index < len(self.queue)) or self.player is None:
             return
         self.current_index = index
+        self._halted = False
         track = self.queue[index]
         self.player.load(self.client.stream_url(track.id))
         self._update_neighbors()
@@ -578,6 +583,11 @@ class JellyfinClientLite(App):
             return
         self._refresh_status()
         self._sync_lyrics()
+        if self._halted:
+            return
+        if self.player.failures >= MAX_FAILURES:
+            self._halt()
+            return
         if self.player.is_idle and self.current_index >= 0:
             self._play_next()
             return
@@ -588,6 +598,17 @@ class JellyfinClientLite(App):
             self.current_index += step
             self._update_neighbors()
             self._show_current()
+
+    def _halt(self) -> None:
+        self.player.stop()
+        self.player.failures = 0
+        self._halted = True
+        self._refresh_status()
+        self.main.query_one("#np-title", Static).update("⚠ Server liefert keine Titel")
+        self.main.query_one("#np-sub", Static).update(
+            f"{MAX_FAILURES} Titel hintereinander ließen sich nicht laden. "
+            "Wiedergabe angehalten - Leertaste für neuen Versuch."
+        )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Klick (oder Enter) auf einen Titel spielt ihn ab."""
@@ -618,7 +639,10 @@ class JellyfinClientLite(App):
             self._refresh_status()
 
     def action_toggle_pause(self) -> None:
-        if self.player and self.current_index < 0 and self.queue:
+        if self.player and self._halted and self.current_index >= 0:
+            # Nach Ladefehlern angehalten: denselben Titel noch einmal versuchen
+            self._play_track(self.current_index)
+        elif self.player and self.current_index < 0 and self.queue:
             # Autoplay war aus: Leertaste startet bei der markierten Zeile
             table = self.main.query_one(TrackTable)
             self._play_track(table.cursor_row if self.shown is self.queue else 0)

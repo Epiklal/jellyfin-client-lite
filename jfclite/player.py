@@ -233,6 +233,8 @@ class MPVPlayer:
         self._recv_buf = b""
         self._request_id = 0
         self._current_pos = 0  # Playlist-Index des laufenden Titels, siehe set_neighbors()
+        # Titel hintereinander, die sich nicht laden ließen (Server weg, 503 ...)
+        self.failures = 0
         # Großzügiges Zeitlimit wegen des Virenscanners beim ersten Start
         # unter Windows - beendet sich mpv vorher, geht es sofort weiter.
         self._connect(timeout=15)
@@ -286,8 +288,16 @@ class MPVPlayer:
                 return None
             if msg.get("request_id") == req_id:
                 return msg
-            # sonst: unaufgefordertes Event -> ignorieren, weiterlesen
+            # sonst: unaufgefordertes Event -> mitzählen, weiterlesen
+            self._on_event(msg)
         return None
+
+    def _on_event(self, msg: dict) -> None:
+        event = msg.get("event")
+        if event == "end-file" and msg.get("reason") == "error":
+            self.failures += 1
+        elif event == "file-loaded":
+            self.failures = 0
 
     def load(self, url: str) -> None:
         if not self.is_idle:
@@ -325,6 +335,11 @@ class MPVPlayer:
             return 0
         step = pos - self._current_pos
         return step if step in (-1, 1) else 0
+
+    def stop(self) -> None:
+        """Hält an und leert die Playlist (mpv springt sonst selbst weiter)."""
+        self.play_pause(True)  # Pause-Knopf und MPRIS zeigen dann "angehalten"
+        self._command("stop")
 
     def play_pause(self, pause: Optional[bool] = None) -> None:
         if pause is None:
