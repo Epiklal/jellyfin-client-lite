@@ -29,6 +29,11 @@ interface plus ~70 MB for mpv, and about 0.3 % of one CPU core while playing.
 - shows the album cover next to the track name and the lyrics stored on your
   server (synced lyrics highlight the current line); both can be switched off
 - search (`/`) across title, artist and album, and a settings dialog (`s`)
+- evens out loudness between tracks (ReplayGain), since shuffling a whole
+  library jumps between very differently mastered albums
+- can pick up where you left off: same order, same track, same position
+- if the server goes away (restart, VPN drops), it pauses and retries instead
+  of skipping through your library
 
 What it doesn't do: browsing albums or playlists. That's on purpose, there
 are bigger clients for that.
@@ -110,8 +115,10 @@ If there's no config yet, the player asks for your server address (it checks
 that it's reachable and shows the server's name) and then lets you log in
 either with username and password or with **Quick Connect**: you get a code
 and confirm it in a Jellyfin that's already logged in (user menu → Quick
-Connect). With Quick Connect no password is stored, only an access token.
-Run `python run.py --setup` to do this again later.
+Connect). Either way only an access token is stored, never your password.
+Run `python run.py --setup` (`jellyfin-client-lite --setup` with the `.deb`)
+to do this again later. If the stored login stops working (e.g. you removed
+the device in the Jellyfin dashboard), the player asks you to log in again.
 
 ## Config
 
@@ -126,12 +133,14 @@ You can also write the file by hand. Create `~/.config/jellyfin-client-lite/conf
 }
 ```
 
-On Linux/macOS, `chmod 600` it, since your password is in there. When running from
+On Linux/macOS, `chmod 600` it until the first start. When running from
 source you can also put `config.json` next to `run.py` (it's in
 `.gitignore`, so it won't end up in a commit).
 
-The player logs in with these, uses the token it gets back, and logs out
-again when you quit.
+On the first start the player logs in with these and then replaces the
+password in the file with the access token it got back (plus a `device_id`),
+so your password doesn't stay on disk. The token stays valid until you remove
+the device in the Jellyfin dashboard.
 
 If JSON isn't your thing: every line except the last one before `}` needs a
 comma at the end. The player tells you the line number if one is missing.
@@ -144,7 +153,8 @@ Press `s` in the player, or edit the config:
 "autoplay": true,
 "start_mode": "shuffle",
 "show_cover": true,
-"show_lyrics": true
+"show_lyrics": true,
+"replaygain": "track"
 ```
 
 - `autoplay`: start playing right away. If off, the library loads and waits;
@@ -153,11 +163,16 @@ Press `s` in the player, or edit the config:
   your Jellyfin server (it has to have them); the cover needs Pillow
   (`pip install pillow`, the `.deb` recommends `python3-pil`) and a terminal
   with true color.
-- `start_mode`: `"shuffle"` or `"sorted"` (by artist, album, title) for the
-  order the list has at startup. `r` always reshuffles.
+- `start_mode`: `"shuffle"`, `"sorted"` (by album artist, album, track
+  number) or `"resume"` (the order, track and position from last time, with
+  tracks that were added in the meantime mixed into the part you haven't
+  heard yet). `r` always reshuffles.
+- `replaygain`: `"track"`, `"album"` or `"no"`. Uses the ReplayGain tags in
+  your files to even out the volume; files without tags play as they are.
 
 Picking a search result plays through the results; closing the search
-brings back the whole library, continuing with the current track.
+brings back the whole library, continuing with the current track. The search
+shows at most 500 results, type a bit more to narrow it down.
 
 ## Keys
 
@@ -171,12 +186,16 @@ brings back the whole library, continuing with the current track.
 | `l` | show / hide lyrics |
 | `c` | show / hide cover |
 | `s` | settings |
+| `g` | jump back to the playing track in the list |
 | `+` / `-` | volume (`=` works too) |
 | `↑` `↓` `Enter` | pick a track from the list |
 | `q` | quit |
 
 Everything at the bottom is clickable as well, including the key hints in
 the footer.
+
+While you scroll or move through the list, the cursor stays where you put it
+instead of jumping to each new track; `g` brings you back.
 
 ## Media keys and the desktop widget
 
@@ -221,10 +240,13 @@ address. Problems end up in `~/.local/state/jellyfin-client-lite/discord.log`.
 
 ## Security notes
 
-- Your password is only stored in `config.json`. The access token never
-  shows up in a URL: mpv gets it as an HTTP header, so it doesn't leak
-  through MPRIS (media widgets, KDE Connect, ...) and it's never sent to
-  Discord.
+- Your password is never stored, only an access token (in `config.json`,
+  readable only by you). The token never shows up in a URL: mpv gets it as
+  an HTTP header, so it doesn't leak through MPRIS (media widgets, KDE
+  Connect, ...) and it's never sent to Discord.
+- Logins use the `Authorization` header. The old `X-Emby-*` headers are off
+  by default from Jellyfin 10.12 on, so older versions of this player stop
+  working there.
 - Control characters in track tags get stripped, so a file with weird tags
   can't mess with your terminal.
 - Jellyfin itself serves audio streams and cover images without a login if
@@ -232,8 +254,9 @@ address. Problems end up in `~/.local/state/jellyfin-client-lite/discord.log`.
   server is public, you might want to only expose `/Items/*/Images/*` through
   your reverse proxy (enough for Discord covers) and keep the rest behind a
   VPN.
-- With `http://` in `server_url`, your password goes over the network in
-  plain text. Fine on your own wired network, less so on shared wifi.
+- With `http://` in `server_url`, your password (once, when logging in) and
+  the token go over the network in plain text. Fine on your own wired
+  network, less so on shared wifi.
 
 ## Transparent background
 
@@ -251,7 +274,7 @@ The package ends up in `dist/`.
 
 ## Credits
 
-The look is borrowed from [jellyfin-tui](https://github.com/Epiklal/jellyfin-client-lite),
+The look is borrowed from [jellyfin-tui](https://github.com/dhonus/jellyfin-tui),
 which is the one to use if you want a full-featured client.
 
 ## License

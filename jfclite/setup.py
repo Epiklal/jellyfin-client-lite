@@ -15,14 +15,14 @@ from typing import Optional
 
 import requests
 
-from .client import JellyfinClient
+from .client import JellyfinClient, new_device_id
 
 QUICK_CONNECT_TIMEOUT = 300  # Sekunden, so lange gilt ein Code auf dem Server
 
 
 def save_config(path: Path, config: dict) -> None:
-    """Schreibt die Config atomar und nur für den Besitzer lesbar (Passwort bzw.
-    Token stehen darin)."""
+    """Schreibt die Config atomar und nur für den Besitzer lesbar (der Token
+    steht darin)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -44,12 +44,12 @@ def _normalize_url(url: str) -> str:
     return url
 
 
-def _ask_server(default: str) -> JellyfinClient:
+def _ask_server(default: str, device_id: str) -> JellyfinClient:
     while True:
         url = _normalize_url(_ask("Serveradresse (z.B. 192.168.1.10:8096)", default))
         if not url:
             continue
-        client = JellyfinClient(url)
+        client = JellyfinClient(url, device_id)
         try:
             info = client.server_info()
         except requests.RequestException as exc:
@@ -71,8 +71,9 @@ def _password_login(client: JellyfinClient, config: dict) -> bool:
     except requests.RequestException as exc:
         print(f"  Anmeldung nicht möglich: {exc}\n")
         return False
-    config.update(username=username, password=password)
-    config.pop("access_token", None)
+    # Gespeichert wird nur der Token, nicht das Passwort
+    config.update(username=username, access_token=client.api_key)
+    config.pop("password", None)
     return True
 
 
@@ -111,8 +112,9 @@ def run_setup(existing: Optional[dict] = None) -> dict:
     """Fragt Serveradresse und Anmeldeart ab, prüft alles gegen den Server und
     gibt die fertige Config zurück (bestehende Einstellungen bleiben erhalten)."""
     config = dict(existing or {})
+    config.setdefault("device_id", new_device_id())
     print("Einrichtung von jellyfin-client-lite\n")
-    client = _ask_server(config.get("server_url", ""))
+    client = _ask_server(config.get("server_url", ""), config["device_id"])
     config["server_url"] = client.server_url
     while True:
         print("Wie willst du dich anmelden?")
@@ -127,8 +129,5 @@ def run_setup(existing: Optional[dict] = None) -> dict:
             continue
         if ok:
             break
-    # Jellyfin-Sitzung von der Prüfung wieder schließen; beim Start meldet sich
-    # run.py selbst an (bei Quick Connect bleibt der Token gültig)
-    client.logout()
     print("Angemeldet. Die Einstellungen (Autoplay usw.) öffnest du im Player mit [s].\n")
     return config

@@ -23,7 +23,7 @@ COPYRIGHT
 
 mkdir -p "$root/DEBIAN"
 sed "s/@VERSION@/$version/" packaging/debian/control.in > "$root/DEBIAN/control"
-install -m755 packaging/debian/postinst "$root/DEBIAN/postinst"
+install -m755 packaging/debian/postinst packaging/debian/prerm -t "$root/DEBIAN"
 
 mkdir -p dist
 dpkg-deb --root-owner-group --build "$root" "dist/${name}_${version}_all.deb"

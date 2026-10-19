@@ -6,6 +6,7 @@
   "start_mode": "shuffle",
   "show_cover": true,
   "show_lyrics": true,
+  "replaygain": "track",
   "discord_client_id": "",
   "public_url": ""
 }

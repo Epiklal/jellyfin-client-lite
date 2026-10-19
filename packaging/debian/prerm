@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Die von postinst erzeugten .pyc-Dateien gehören zu keinem Paket
+if command -v py3clean >/dev/null 2>&1; then
+    py3clean -p jellyfin-client-lite || true
+else
+    rm -rf /usr/lib/jellyfin-client-lite/__pycache__ /usr/lib/jellyfin-client-lite/jfclite/__pycache__
+fi
+
+exit 0

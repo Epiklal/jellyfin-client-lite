@@ -7,5 +7,10 @@ fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 fi
+# Einmal vorkompilieren: als normaler Benutzer kann Python in /usr/lib keinen
+# __pycache__ anlegen und würde sonst bei jedem Start neu übersetzen
+if command -v py3compile >/dev/null 2>&1; then
+    py3compile -p jellyfin-client-lite /usr/lib/jellyfin-client-lite || true
+fi
 
 exit 0

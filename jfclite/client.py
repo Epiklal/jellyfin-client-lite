@@ -17,11 +17,6 @@ import requests
 
 from . import CACHE_DIR, NAME, __version__
 
-# Pro Prozessstart eine eigene, zufällige Geräte-ID: verhindert, dass ein
-# zweiter (versehentlich parallel laufender) Start dem ersten die Jellyfin-
-# Sitzung/den Token wegnimmt (Jellyfin invalidiert sonst bei gleicher
-# Geräte-ID die vorherige Sitzung - das führte zu sporadischen 401ern).
-DEVICE_ID = f"{NAME}-{uuid.uuid4().hex[:12]}"
 DEVICE_NAME = NAME
 CLIENT_NAME = NAME
 CLIENT_VERSION = __version__
@@ -30,12 +25,30 @@ CLIENT_VERSION = __version__
 # Bibliothek auszuliefern (3000 Titel = ~10 s) - aus dem Cache startet die
 # Wiedergabe sofort, neu geladen wird nur, wenn sich etwas geändert hat.
 CACHE_PATH = CACHE_DIR / "library.json"
-CACHE_VERSION = 2  # erhöhen, wenn sich die Felder von Track ändern
+CACHE_VERSION = 3  # erhöhen, wenn sich die Felder von Track ändern
+
+# Reihenfolge und Position beim Beenden, für start_mode "resume"
+QUEUE_PATH = CACHE_DIR / "queue.json"
 
 # Steuerzeichen in Tags (z.B. ESC) gingen sonst ungefiltert ans Terminal: eine
 # präparierte Datei könnte Fenstertitel oder Zwischenablage (OSC 52)
 # manipulieren. Dazu Bidi-Steuerzeichen, die Text optisch umdrehen.
-_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+")
+_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]+")
+
+
+def _clean(text: str) -> str:
+    return _UNSAFE_CHARS.sub(" ", text).strip()
+
+
+def new_device_id() -> str:
+    """Einmal pro Installation erzeugt und in der Config gespeichert. Meldet
+    sich dasselbe Gerät neu an (--setup), ersetzt Jellyfin den alten Token,
+    statt einen weiteren anzulegen."""
+    return f"{NAME}-{uuid.uuid4().hex[:12]}"
+
+
+class AuthError(RuntimeError):
+    """Anmeldung abgelehnt (falsches Passwort, Token abgelaufen/widerrufen)."""
 
 
 @dataclass
@@ -46,11 +59,15 @@ class Track:
     album: str
     duration_ticks: int  # Jellyfin ticks (1 tick = 100ns)
     album_id: str = ""  # für das Cover (hängt meist am Album, nicht am Titel)
+    album_artist: str = ""  # zum Sortieren: hält Sampler zusammen
+    disc: int = 0
+    number: int = 0
 
     def __post_init__(self) -> None:
-        self.title = _UNSAFE_CHARS.sub(" ", self.title).strip()
-        self.artist = _UNSAFE_CHARS.sub(" ", self.artist).strip()
-        self.album = _UNSAFE_CHARS.sub(" ", self.album).strip()
+        self.title = _clean(self.title)
+        self.artist = _clean(self.artist)
+        self.album = _clean(self.album)
+        self.album_artist = _clean(self.album_artist)
 
     @property
     def duration_seconds(self) -> float:
@@ -62,23 +79,52 @@ class Track:
         return f"{secs // 60}:{secs % 60:02d}"
 
 
+def _track_from_item(item: dict) -> Track:
+    # Die Interpreten des Titels, nicht der Album-Interpret: bei Samplern
+    # stünde sonst überall "Various Artists".
+    artists = ", ".join(a for a in item.get("Artists") or [] if a)
+    artist = artists or item.get("AlbumArtist") or "Unbekannt"
+    return Track(
+        id=item["Id"],
+        title=item.get("Name") or "Unbekannt",
+        artist=artist,
+        album=item.get("Album") or "",
+        duration_ticks=item.get("RunTimeTicks") or 0,
+        album_id=item.get("AlbumId") or "",
+        album_artist=item.get("AlbumArtist") or artist,
+        disc=item.get("ParentIndexNumber") or 0,
+        number=item.get("IndexNumber") or 0,
+    )
+
+
+def _write_json(path: Path, data: dict) -> None:
+    """Atomar schreiben; Fehler sind egal (Cache bzw. Komfortfunktion)."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 class JellyfinClient:
-    def __init__(self, server_url: str):
+    def __init__(self, server_url: str, device_id: str):
         self.server_url = server_url.rstrip("/")
-        self.api_key: Optional[str] = None  # wird nach login() gesetzt (Access Token)
+        self.api_key: Optional[str] = None  # Access Token, nach der Anmeldung
         self.user_id: Optional[str] = None
-        # Quick-Connect-Token liegen in der Config und müssen das Programmende
-        # überleben - nur Token aus Benutzername + Passwort werden abgemeldet.
-        self.keep_token = False
-        self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "X-Emby-Authorization": (
-                    f'MediaBrowser Client="{CLIENT_NAME}", Device="{DEVICE_NAME}", '
-                    f'DeviceId="{DEVICE_ID}", Version="{CLIENT_VERSION}"'
-                ),
-            }
+        # Jellyfin 10.12 nimmt die alten X-Emby-*-Header standardmäßig nicht
+        # mehr an, nur noch "Authorization: MediaBrowser ...".
+        self._auth = (
+            f'MediaBrowser Client="{CLIENT_NAME}", Device="{DEVICE_NAME}", '
+            f'DeviceId="{device_id}", Version="{CLIENT_VERSION}"'
         )
+        self._session = requests.Session()
+        self._use_token(None)
+
+    def _use_token(self, token: Optional[str]) -> None:
+        header = self._auth + (f', Token="{token}"' if token else "")
+        self._session.headers["Authorization"] = header
 
     def login(self, username: str, password: str) -> None:
         """Meldet sich mit Benutzername + Passwort an und holt sich damit
@@ -89,14 +135,14 @@ class JellyfinClient:
             timeout=10,
         )
         if resp.status_code == 401:
-            raise RuntimeError("Anmeldung fehlgeschlagen: Benutzername oder Passwort falsch.")
+            raise AuthError("Anmeldung fehlgeschlagen: Benutzername oder Passwort falsch.")
         resp.raise_for_status()
         self._set_token(resp.json())
 
     def _set_token(self, data: dict) -> None:
         self.api_key = data["AccessToken"]
         self.user_id = data["User"]["Id"]
-        self._session.headers.update({"X-Emby-Token": self.api_key})
+        self._use_token(self.api_key)
 
     def server_info(self) -> dict:
         """Name und Version des Servers (ohne Anmeldung) - zugleich ein Test,
@@ -106,18 +152,15 @@ class JellyfinClient:
         return resp.json()
 
     def login_with_token(self, token: str) -> None:
-        """Übernimmt einen gespeicherten Token (Quick Connect) und prüft ihn."""
-        self._session.headers.update({"X-Emby-Token": token})
+        """Übernimmt den gespeicherten Token und prüft ihn."""
+        self._use_token(token)
         resp = self._session.get(f"{self.server_url}/Users/Me", timeout=10)
         if resp.status_code == 401:
-            self._session.headers.pop("X-Emby-Token", None)
-            raise RuntimeError(
-                "Die gespeicherte Anmeldung ist abgelaufen oder wurde widerrufen."
-            )
+            self._use_token(None)
+            raise AuthError("Die gespeicherte Anmeldung ist abgelaufen oder wurde widerrufen.")
         resp.raise_for_status()
         self.api_key = token
         self.user_id = resp.json()["Id"]
-        self.keep_token = True
 
     def quick_connect_start(self) -> Tuple[str, str]:
         """Startet Quick Connect: (Code zum Eingeben in Jellyfin, Geheimnis)."""
@@ -145,12 +188,30 @@ class JellyfinClient:
         )
         resp.raise_for_status()
         self._set_token(resp.json())
-        self.keep_token = True
 
     def resolve_user_id(self) -> str:
         if not self.user_id:
             raise RuntimeError("Nicht angemeldet - login() wurde nicht aufgerufen.")
         return self.user_id
+
+    def _items(self, params: dict, timeout) -> dict:
+        resp = self._session.get(
+            f"{self.server_url}/Items",
+            params={
+                "userId": self.resolve_user_id(),
+                "IncludeItemTypes": "Audio",
+                "Recursive": "true",
+                # Bild-Infos und Wiedergabe-Status (UserData) werden nicht
+                # gebraucht - spart dem Server Datenbankabfragen und
+                # verkleinert die Antwort (schnellerer Start über VPN).
+                "EnableImages": "false",
+                "EnableUserData": "false",
+                **params,
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     def fetch_all_tracks(self) -> List[Track]:
         """Holt ALLE Audio-Titel der Bibliothek in Seiten (schonend für den Server).
@@ -160,43 +221,28 @@ class JellyfinClient:
         dauern, daher hier bewusst großzügig statt schnell abzubrechen."""
         # 10 min Puffer gegen leicht verstellte Uhren zwischen PC und Server
         fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 600))
-        user_id = self.resolve_user_id()
         tracks: List[Track] = []
+        seen = set()
         start = 0
         page_size = 500
         while True:
-            resp = self._session.get(
-                f"{self.server_url}/Users/{user_id}/Items",
-                params={
-                    "IncludeItemTypes": "Audio",
-                    "Recursive": "true",
-                    "Fields": "RunTimeTicks",
-                    # Bild-Infos und Wiedergabe-Status (UserData) werden nicht
-                    # gebraucht - spart dem Server Datenbankabfragen und
-                    # verkleinert die Antwort (schnellerer Start über VPN).
-                    "EnableImages": "false",
-                    "EnableUserData": "false",
+            data = self._items(
+                {
+                    # Feste Reihenfolge, sonst ist nicht garantiert, dass die
+                    # Seiten lückenlos aneinander passen
+                    "SortBy": "SortName,DateCreated",
                     "StartIndex": start,
                     "Limit": page_size,
                 },
                 timeout=(15, 180),
             )
-            resp.raise_for_status()
-            data = resp.json()
             items = data.get("Items", [])
             for item in items:
-                tracks.append(
-                    Track(
-                        id=item["Id"],
-                        title=item.get("Name", "Unbekannt"),
-                        artist=item.get("AlbumArtist") or item.get("Artists", ["Unbekannt"])[0]
-                        if item.get("Artists")
-                        else "Unbekannt",
-                        album=item.get("Album", ""),
-                        duration_ticks=item.get("RunTimeTicks", 0) or 0,
-                        album_id=item.get("AlbumId", ""),
-                    )
-                )
+                # Läuft gerade ein Scan, verschieben sich die Seiten: ein Titel
+                # kann doppelt kommen (und die Tabelle verträgt keine doppelten IDs)
+                if item["Id"] not in seen:
+                    seen.add(item["Id"])
+                    tracks.append(_track_from_item(item))
             start += page_size
             if start >= data.get("TotalRecordCount", 0) or not items:
                 break
@@ -206,33 +252,55 @@ class JellyfinClient:
     def load_cache(self) -> Optional[Tuple[List[Track], str]]:
         """Titel-Liste vom letzten Laden (gleicher Server/Benutzer) und wann sie
         geladen wurde, oder None."""
+        data = self._load_for_me(CACHE_PATH)
+        if data is None or data.get("version") != CACHE_VERSION:
+            return None
         try:
-            data = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-            if (
-                data.get("version") != CACHE_VERSION
-                or data["server_url"] != self.server_url
-                or data["user_id"] != self.user_id
-            ):
-                return None
             return [Track(*t) for t in data["tracks"]], data["fetched_at"]
+        except (KeyError, TypeError):
+            return None
+
+    def _load_for_me(self, path: Path) -> Optional[dict]:
+        """JSON-Datei, sofern sie zu diesem Server und Benutzer gehört."""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data["server_url"] != self.server_url or data["user_id"] != self.user_id:
+                return None
+            return data
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
     def _save_cache(self, tracks: List[Track], fetched_at: str) -> None:
-        data = {
-            "version": CACHE_VERSION,
-            "server_url": self.server_url,
-            "user_id": self.user_id,
-            "fetched_at": fetched_at,
-            "tracks": [astuple(t) for t in tracks],
-        }
-        try:
-            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            tmp = CACHE_PATH.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, CACHE_PATH)
-        except OSError:
-            pass  # ohne Cache geht es auch, dann eben beim nächsten Start langsamer
+        _write_json(
+            CACHE_PATH,
+            {
+                "version": CACHE_VERSION,
+                "server_url": self.server_url,
+                "user_id": self.user_id,
+                "fetched_at": fetched_at,
+                "tracks": [astuple(t) for t in tracks],
+            },
+        )
+
+    def save_queue(self, ids: List[str], index: int, position: float, shuffle: bool) -> None:
+        _write_json(
+            QUEUE_PATH,
+            {
+                "server_url": self.server_url,
+                "user_id": self.user_id,
+                "ids": ids,
+                "index": index,
+                "position": round(position, 1),
+                "shuffle": shuffle,
+            },
+        )
+
+    def load_queue(self) -> Optional[dict]:
+        """Gespeicherte Reihenfolge: {"ids", "index", "position", "shuffle"}."""
+        data = self._load_for_me(QUEUE_PATH)
+        if data is None or not isinstance(data.get("ids"), list):
+            return None
+        return data
 
     def library_changed(self, cached_count: int, since: str) -> bool:
         """Zwei billige Zähl-Abfragen (je ~20-40 ms) statt die ganze Bibliothek
@@ -244,20 +312,8 @@ class JellyfinClient:
         )
 
     def _count_tracks(self, **filters: str) -> int:
-        resp = self._session.get(
-            f"{self.server_url}/Users/{self.resolve_user_id()}/Items",
-            params={
-                "IncludeItemTypes": "Audio",
-                "Recursive": "true",
-                "Limit": 0,
-                "EnableImages": "false",
-                "EnableUserData": "false",
-                **filters,
-            },
-            timeout=(15, 60),
-        )
-        resp.raise_for_status()
-        return resp.json().get("TotalRecordCount", 0)
+        data = self._items({"Limit": 0, **filters}, timeout=(15, 60))
+        return data.get("TotalRecordCount", 0)
 
     def fetch_cover(self, item_id: str) -> Optional[bytes]:
         """Kleines Cover (Album oder Titel), None wenn es keins gibt. Der Token
@@ -285,7 +341,7 @@ class JellyfinClient:
             lines.append(
                 (
                     start / 10_000_000 if start is not None else None,
-                    _UNSAFE_CHARS.sub(" ", line.get("Text") or "").strip(),
+                    _clean(line.get("Text") or ""),
                 )
             )
         return lines
@@ -299,18 +355,7 @@ class JellyfinClient:
         return f"{self.server_url}/Audio/{track_id}/stream?static=true"
 
     def stream_headers(self) -> List[str]:
-        return [f"X-Emby-Token: {self.api_key}"]
-
-    def logout(self) -> None:
-        """Meldet den Token beim Server ab - sonst bliebe nach jedem Start ein
-        weiterer, unbegrenzt gültiger Token auf dem Server zurück."""
-        if not self.api_key or self.keep_token:
-            return
-        try:
-            self._session.post(f"{self.server_url}/Sessions/Logout", timeout=3)
-        except requests.RequestException:
-            pass
-        self.api_key = None
+        return [f'Authorization: MediaBrowser Token="{self.api_key}"']
 
 
 def shuffled(tracks: List[Track]) -> List[Track]:
@@ -320,4 +365,13 @@ def shuffled(tracks: List[Track]) -> List[Track]:
 
 
 def sorted_tracks(tracks: List[Track]) -> List[Track]:
-    return sorted(tracks, key=lambda t: (t.artist.casefold(), t.album.casefold(), t.title.casefold()))
+    return sorted(
+        tracks,
+        key=lambda t: (
+            t.album_artist.casefold(),
+            t.album.casefold(),
+            t.disc,
+            t.number,
+            t.title.casefold(),
+        ),
+    )

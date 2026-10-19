@@ -138,6 +138,65 @@ def packages_hint() -> Optional[str]:
     return "\n".join(lines)
 
 
+def setup_command() -> str:
+    """So startet man die Einrichtung in der jeweiligen Installationsart."""
+    if WINDOWS:
+        return "jellyfin-client-lite.cmd --setup"
+    if HERE == Path("/usr/lib/jellyfin-client-lite"):  # .deb
+        return "jellyfin-client-lite --setup"
+    return "python run.py --setup"
+
+
+def connect(config: dict, config_path: Path):
+    """Meldet sich an und gibt (Client, Config) zurück. Gespeichert wird nur
+    der Token: ein Passwort aus einer von Hand geschriebenen Config wird nach
+    der ersten Anmeldung durch ihn ersetzt. Ist die Anmeldung ungültig, geht
+    es (im Terminal) direkt mit der Einrichtung weiter."""
+    import requests
+
+    from jfclite.client import AuthError, JellyfinClient, new_device_id
+    from jfclite.setup import run_setup, save_config
+
+    while True:
+        changed = "device_id" not in config
+        config.setdefault("device_id", new_device_id())
+        client = JellyfinClient(config["server_url"], config["device_id"])
+        try:
+            if config.get("access_token"):
+                client.login_with_token(config["access_token"])
+            elif config.get("username") and config.get("password"):
+                client.login(config["username"], config["password"])
+                config["access_token"] = client.api_key
+                config.pop("password", None)
+                changed = True
+                print("Angemeldet - statt des Passworts steht jetzt ein Token in der Konfiguration.")
+            else:
+                raise AuthError("In der Konfiguration fehlen die Anmeldedaten.")
+        except AuthError as exc:
+            print(exc)
+            if not sys.stdin.isatty():
+                print(f"Neu einrichten mit:  {setup_command()}")
+                sys.exit(1)
+            print("Bitte neu anmelden.\n")
+            config = run_setup(config)
+            save_config(config_path, config)
+            continue
+        except (requests.ConnectionError, requests.Timeout):
+            print(f"Jellyfin unter {config['server_url']} ist nicht erreichbar.")
+            print("Stimmt die Adresse in der Konfiguration, und läuft der Server?")
+            sys.exit(1)
+        except Exception as exc:
+            print(f"Anmeldung bei Jellyfin fehlgeschlagen: {exc}")
+            print(f"Neu einrichten mit:  {setup_command()}")
+            sys.exit(1)
+        if changed:
+            try:
+                save_config(config_path, config)
+            except OSError as exc:
+                print(f"Konfiguration konnte nicht gespeichert werden: {exc}")
+        return client, config
+
+
 def main() -> None:
     migrate_old_dirs()
     config = load_config()
@@ -159,9 +218,6 @@ def main() -> None:
         sys.exit(1)
     MPVPlayer.EXECUTABLE = mpv
 
-    import requests
-
-    from jfclite.client import JellyfinClient
     from jfclite.app import JellyfinClientLite
     from jfclite.setup import run_setup, save_config
 
@@ -172,20 +228,7 @@ def main() -> None:
         save_config(config_path, config)
         print(f"Gespeichert in {config_path}\n")
 
-    client = JellyfinClient(server_url=config["server_url"])
-    try:
-        if config.get("access_token"):
-            client.login_with_token(config["access_token"])
-        else:
-            client.login(config["username"], config["password"])
-    except (requests.ConnectionError, requests.Timeout):
-        print(f"Jellyfin unter {config['server_url']} ist nicht erreichbar.")
-        print("Stimmt die Adresse in der Konfiguration, und läuft der Server?")
-        sys.exit(1)
-    except Exception as exc:
-        print(f"Anmeldung bei Jellyfin fehlgeschlagen: {exc}")
-        print("Neu einrichten mit:  python run.py --setup")
-        sys.exit(1)
+    client, config = connect(config, config_path)
 
     presence = None
     if config.get("discord_client_id"):
@@ -201,6 +244,7 @@ def main() -> None:
         config=config,
         save_config=lambda: save_config(config_path, config),
     )
+    # Kein Abmelden am Ende: der Token in der Config soll gültig bleiben
     try:
         app.run()
     except Exception:
@@ -208,8 +252,6 @@ def main() -> None:
 
         traceback.print_exc()
         sys.exit(1)
-    finally:
-        client.logout()
 
 
 if __name__ == "__main__":
