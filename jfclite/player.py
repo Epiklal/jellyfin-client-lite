@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -140,9 +141,10 @@ LEAN_OPTIONS = [
 ]
 
 
-def _supported(mpv: str, options: list[str]) -> list[str]:
-    """Filtert Optionen heraus, die die installierte mpv-Version nicht kennt -
-    mpv würde sonst gar nicht erst starten (z.B. ältere mpv unter Ubuntu)."""
+def _known_options(mpv: str) -> set[str]:
+    """Optionen, die die installierte mpv-Version kennt (leer, wenn sich mpv
+    nicht fragen lässt). Unbekannte Optionen ließen mpv gar nicht erst
+    starten, z.B. ältere mpv unter Ubuntu."""
     try:
         out = subprocess.run(
             [mpv, "--list-options"],
@@ -155,11 +157,8 @@ def _supported(mpv: str, options: list[str]) -> list[str]:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         ).stdout
     except (OSError, subprocess.SubprocessError):
-        return []
-    known = {
-        line.split()[0] for line in out.splitlines() if line.lstrip().startswith("--")
-    }
-    return [opt for opt in options if opt.split("=")[0] in known]
+        return set()
+    return {line.split()[0] for line in out.splitlines() if line.lstrip().startswith("--")}
 
 
 class MPVPlayer:
@@ -169,25 +168,41 @@ class MPVPlayer:
     LOG_MAX_BYTES = 1_000_000  # darüber wird beim Start neu angefangen (alte -> .1)
 
     def __init__(self, extra_args: Optional[list[str]] = None):
-        # Über den Socket lässt sich mpv komplett steuern (bis hin zum Starten
-        # von Programmen) - daher im privaten Laufzeitordner statt in /tmp.
-        # Kurzer Name: macOS erlaubt nur 104 Zeichen, und dessen $TMPDIR ist lang.
-        name = f"jfclite-mpv-{uuid.uuid4().hex[:16]}"
-        if ipc.WINDOWS:
-            self._socket_path = rf"\\.\pipe\{name}"
+        known = _known_options(self.EXECUTABLE)
+        self._sock = None  # socket.socket oder ipc._WindowsPipe
+        self._socket_path: Optional[str] = None
+        child = None
+        if not ipc.WINDOWS and "--input-ipc-client" in known:
+            # mpv bekommt ein Ende eines Socket-Paars vererbt, statt selbst einen
+            # Socket anzulegen. Geht unser Ende zu - auch wenn Python per Signal
+            # oder kill -9 stirbt, ohne aufzuräumen -, beendet sich mpv von
+            # selbst, statt verwaist weiterzuspielen (samt MPRIS-Eintrag), und
+            # es bleibt keine Socket-Datei liegen.
+            self._sock, child = socket.socketpair()
+            self._sock.settimeout(2)
+            ipc_arg = f"--input-ipc-client=fd://{child.fileno()}"
         else:
-            self._socket_path = os.path.join(
-                os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir(),
-                f"{name}.sock",
-            )
+            # Windows und ältere mpv: Über den Socket lässt sich mpv komplett
+            # steuern (bis hin zum Starten von Programmen) - daher im privaten
+            # Laufzeitordner statt in /tmp. Kurzer Name: macOS erlaubt nur 104
+            # Zeichen, und dessen $TMPDIR ist lang.
+            name = f"jfclite-mpv-{uuid.uuid4().hex[:16]}"
+            if ipc.WINDOWS:
+                self._socket_path = rf"\\.\pipe\{name}"
+            else:
+                self._socket_path = os.path.join(
+                    os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir(),
+                    f"{name}.sock",
+                )
+            ipc_arg = f"--input-ipc-server={self._socket_path}"
         args = [
             self.EXECUTABLE,
             "--no-video",
             "--idle=yes",
             "--force-window=no",
             "--msg-level=all=warn,mpris=info",
-            f"--input-ipc-server={self._socket_path}",
-            *_supported(self.EXECUTABLE, LEAN_OPTIONS),
+            ipc_arg,
+            *[opt for opt in LEAN_OPTIONS if opt.split("=")[0] in known],
         ]
         if extra_args:
             args.extend(extra_args)
@@ -228,8 +243,10 @@ class MPVPlayer:
             stderr=log_file,
             # Windows: kein eigenes Konsolenfenster für mpv aufpoppen lassen
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            pass_fds=(child.fileno(),) if child else (),
         )
-        self._sock = None  # socket.socket oder ipc._WindowsPipe
+        if child:
+            child.close()  # gehört jetzt mpv - sonst merken wir sein Ende nicht
         self._recv_buf = b""
         self._request_id = 0
         self._current_pos = 0  # Playlist-Index des laufenden Titels, siehe set_neighbors()
@@ -237,14 +254,22 @@ class MPVPlayer:
         self.failures = 0
         # Großzügiges Zeitlimit wegen des Virenscanners beim ersten Start
         # unter Windows - beendet sich mpv vorher, geht es sofort weiter.
-        self._connect(timeout=15)
+        try:
+            self._connect(timeout=15)
+        except Exception:
+            self.shutdown()
+            raise
 
     def _connect(self, timeout: float = 5) -> None:
         deadline = time.time() + timeout
         while time.time() < deadline and self._proc.poll() is None:
+            if self._socket_path is None:
+                # Socket-Paar: steht schon, warten, bis mpv antwortet
+                if self._command("get_property", "mpv-version"):
+                    return
             # (Windows-Pipes nicht per exists() prüfen - das verbraucht eine
             # Verbindung von mpv)
-            if ipc.WINDOWS or os.path.exists(self._socket_path):
+            elif ipc.WINDOWS or os.path.exists(self._socket_path):
                 try:
                     self._sock = ipc.connect(self._socket_path, timeout=2)
                     return
@@ -252,6 +277,16 @@ class MPVPlayer:
                     pass
             time.sleep(0.05)
         raise RuntimeError(f"Keine Verbindung zu mpv, Details stehen in {self.LOG_PATH}")
+
+    @property
+    def alive(self) -> bool:
+        """False, sobald mpv beendet ist - abgestürzt oder von außen gekillt."""
+        return self._proc.poll() is None
+
+    @property
+    def exit_code(self) -> Optional[int]:
+        """Exit-Code von mpv (negativ: Nummer des Signals), solange es läuft None."""
+        return self._proc.returncode
 
     def _read_line(self) -> Optional[dict]:
         """Liest genau eine JSON-Zeile vom Socket (aus Puffer oder neu empfangen)."""
@@ -399,7 +434,7 @@ class MPVPlayer:
             self._proc.terminate()
         except Exception:
             pass
-        if not ipc.WINDOWS:
+        if self._socket_path and not ipc.WINDOWS:
             try:
                 os.remove(self._socket_path)
             except OSError:

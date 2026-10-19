@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Callable, List, Optional
 
 from rich.text import Text
@@ -41,6 +42,9 @@ ACCENT = "#e63946"  # rot
 # So viele Titel dürfen hintereinander scheitern, bevor die Wiedergabe anhält -
 # sonst rauscht der Player bei einem Server-Neustart durch die ganze Bibliothek.
 MAX_FAILURES = 5
+# So oft pro Minute wird ein abgestürztes mpv von selbst neu gestartet - stürzt
+# es öfter ab (z.B. an jedem Titel), bleibt es aus statt endlos neu zu starten.
+MAX_RESTARTS = 3
 
 CSS = f"""
 Screen {{
@@ -320,6 +324,8 @@ class JellyfinClientLite(App):
         self.queue: List[Track] = []
         self.current_index: int = -1
         self._halted = False  # nach zu vielen Ladefehlern angehalten
+        self._crashes: list = []  # Zeitpunkte der letzten mpv-Abstürze
+        self._loading = False  # Bibliothek wird gerade geladen
         self.config = config if config is not None else {}
         self._save_config = save_config
         self.all_tracks: List[Track] = []
@@ -390,29 +396,41 @@ class JellyfinClientLite(App):
         self.main.query_one("#np-sub", Static).update(
             "Kann bei großen Bibliotheken oder über VPN/Tunnel einen Moment dauern."
         )
+        self._start_loading()
+        self.set_interval(1.0, self._tick)
+
+    def _start_loading(self) -> None:
+        """Lädt die Bibliothek im Hintergrund - nie zweimal gleichzeitig, auch
+        wenn r mehrmals gedrückt wird, während der Server noch antwortet."""
+        if self._loading:
+            return
+        self._loading = True
         self.run_worker(self._load_library, thread=True, exit_on_error=False)
 
     def _load_library(self) -> None:
-        cached = self.client.load_cache()
-        if cached:
-            # Sofort aus dem Cache loslegen, danach im Hintergrund prüfen, ob
-            # sich auf dem Server etwas geändert hat.
-            tracks, fetched_at = cached
-            self.call_from_thread(self._on_library_loaded, tracks)
-            try:
-                if not self.client.library_changed(len(tracks), fetched_at):
-                    return
-                tracks = self.client.fetch_all_tracks()
-            except Exception:
-                return  # Server gerade nicht erreichbar -> mit dem Cache weiter
-            self.call_from_thread(self._on_library_updated, tracks)
-            return
         try:
-            tracks = self.client.fetch_all_tracks()
-        except Exception as exc:
-            self.call_from_thread(self._on_library_error, exc)
-            return
-        self.call_from_thread(self._on_library_loaded, tracks)
+            cached = self.client.load_cache()
+            if cached:
+                # Sofort aus dem Cache loslegen, danach im Hintergrund prüfen, ob
+                # sich auf dem Server etwas geändert hat.
+                tracks, fetched_at = cached
+                self.call_from_thread(self._on_library_loaded, tracks)
+                try:
+                    if not self.client.library_changed(len(tracks), fetched_at):
+                        return
+                    tracks = self.client.fetch_all_tracks()
+                except Exception:
+                    return  # Server gerade nicht erreichbar -> mit dem Cache weiter
+                self.call_from_thread(self._on_library_updated, tracks)
+                return
+            try:
+                tracks = self.client.fetch_all_tracks()
+            except Exception as exc:
+                self.call_from_thread(self._on_library_error, exc)
+                return
+            self.call_from_thread(self._on_library_loaded, tracks)
+        finally:
+            self._loading = False
 
     def _on_library_error(self, exc: Exception) -> None:
         self.main.query_one("#np-title", Static).update("⚠ Bibliothek konnte nicht geladen werden")
@@ -428,9 +446,8 @@ class JellyfinClientLite(App):
             return
         self.all_tracks = tracks
         self._reshuffle(tracks)
-        if self.player is None:
-            self.player = MPVPlayer()
-            self.player.set_http_headers(self.client.stream_headers())
+        if self.player is None and not self._start_player():
+            return
         if self.config.get("autoplay", True):
             self._play_next()
         else:
@@ -438,7 +455,40 @@ class JellyfinClientLite(App):
                 f"{len(tracks)} Titel geladen - Leertaste oder Enter zum Abspielen"
             )
             self.main.query_one("#np-sub", Static).update("")
-        self.set_interval(1.0, self._tick)
+
+    def _start_player(self) -> bool:
+        """Startet mpv. Klappt das nicht, steht der Grund in der Anzeige."""
+        try:
+            self.player = MPVPlayer()
+        except Exception as exc:
+            self.main.query_one("#np-title", Static).update("⚠ mpv ließ sich nicht starten")
+            self.main.query_one("#np-sub", Static).update(
+                f"{exc}  —  Leertaste für neuen Versuch"
+            )
+            return False
+        self.player.set_http_headers(self.client.stream_headers())
+        return True
+
+    def _restart_player(self) -> None:
+        """mpv ist abgestürzt oder wurde von außen beendet: neu starten und den
+        aktuellen Titel noch einmal spielen - außer es passiert ständig."""
+        code, log_path = self.player.exit_code, self.player.LOG_PATH
+        self.player.shutdown()
+        self.player = None
+        now = time.monotonic()
+        self._crashes = [t for t in self._crashes if now - t < 60] + [now]
+        if len(self._crashes) > MAX_RESTARTS:
+            self.main.query_one("#np-title", Static).update("⚠ mpv stürzt immer wieder ab")
+            self.main.query_one("#np-sub", Static).update(
+                f"Details stehen in {log_path}  —  Leertaste für neuen Versuch"
+            )
+            return
+        self.notify(
+            f"mpv wurde unerwartet beendet (Exit-Code {code}) und neu gestartet.",
+            severity="warning",
+        )
+        if self._start_player() and self.current_index >= 0 and not self._halted:
+            self._play_track(self.current_index)
 
     def _on_library_updated(self, tracks: List[Track]) -> None:
         """Bibliothek hat sich auf dem Server geändert: neue Liste übernehmen,
@@ -535,6 +585,8 @@ class JellyfinClientLite(App):
         self._show_current()
 
     def _update_neighbors(self) -> None:
+        if self.player is None:
+            return
         i = self.current_index
         prev_url = self.client.stream_url(self.queue[i - 1].id) if i > 0 else None
         next_url = (
@@ -557,6 +609,8 @@ class JellyfinClientLite(App):
         self._load_extras()
 
     def _play_next(self) -> None:
+        if self.player is None:
+            return
         if self.current_index + 1 >= len(self.queue):
             # Bibliothek durch - neu mischen statt zu stoppen (Endlos-Zufallswiedergabe)
             self._reshuffle(self.all_tracks if self.search_active else self.queue)
@@ -580,6 +634,9 @@ class JellyfinClientLite(App):
 
     def _tick(self) -> None:
         if self.player is None:
+            return
+        if not self.player.alive:
+            self._restart_player()
             return
         self._refresh_status()
         self._sync_lyrics()
@@ -639,14 +696,22 @@ class JellyfinClientLite(App):
             self._refresh_status()
 
     def action_toggle_pause(self) -> None:
-        if self.player and self._halted and self.current_index >= 0:
+        if self.player is None:
+            # mpv ließ sich nicht starten oder stürzte zu oft ab: neuer Versuch
+            if not self.queue or not self._start_player():
+                return
+            self._crashes.clear()
+            if self.current_index >= 0:
+                self._play_track(self.current_index)
+                return
+        if self._halted and self.current_index >= 0:
             # Nach Ladefehlern angehalten: denselben Titel noch einmal versuchen
             self._play_track(self.current_index)
-        elif self.player and self.current_index < 0 and self.queue:
+        elif self.current_index < 0 and self.queue:
             # Autoplay war aus: Leertaste startet bei der markierten Zeile
             table = self.main.query_one(TrackTable)
             self._play_track(table.cursor_row if self.shown is self.queue else 0)
-        elif self.player:
+        else:
             self.player.play_pause()
             self._refresh_status()
 
@@ -669,7 +734,7 @@ class JellyfinClientLite(App):
     def action_reshuffle(self) -> None:
         if not self.queue:
             # Laden ist vermutlich fehlgeschlagen -> erneut versuchen
-            self.run_worker(self._load_library, thread=True, exit_on_error=False)
+            self._start_loading()
             return
         self._reshuffle(self.all_tracks if self.search_active else self.queue, shuffle=True)
         self._play_next()
