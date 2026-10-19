@@ -26,6 +26,20 @@ DEVICE_NAME = NAME
 CLIENT_NAME = NAME
 CLIENT_VERSION = __version__
 
+
+def _auth_header(token: Optional[str] = None) -> str:
+    """Wert für den "Authorization"-Header. Neuere Jellyfin-Server lehnen die
+    alten X-Emby-Authorization/X-Emby-Token-Header ab (Anmeldung schlug mit
+    HTTP 400 fehl), daher Client-Infos und Token zusammen in diesem Header."""
+    value = (
+        f'MediaBrowser Client="{CLIENT_NAME}", Device="{DEVICE_NAME}", '
+        f'DeviceId="{DEVICE_ID}", Version="{CLIENT_VERSION}"'
+    )
+    if token:
+        value += f', Token="{token}"'
+    return value
+
+
 # Titel-Liste vom letzten Start: der Server braucht ~3 ms pro Titel, um die
 # Bibliothek auszuliefern (3000 Titel = ~10 s) - aus dem Cache startet die
 # Wiedergabe sofort, neu geladen wird nur, wenn sich etwas geändert hat.
@@ -71,14 +85,7 @@ class JellyfinClient:
         # überleben - nur Token aus Benutzername + Passwort werden abgemeldet.
         self.keep_token = False
         self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "X-Emby-Authorization": (
-                    f'MediaBrowser Client="{CLIENT_NAME}", Device="{DEVICE_NAME}", '
-                    f'DeviceId="{DEVICE_ID}", Version="{CLIENT_VERSION}"'
-                ),
-            }
-        )
+        self._session.headers["Authorization"] = _auth_header()
 
     def login(self, username: str, password: str) -> None:
         """Meldet sich mit Benutzername + Passwort an und holt sich damit
@@ -96,7 +103,7 @@ class JellyfinClient:
     def _set_token(self, data: dict) -> None:
         self.api_key = data["AccessToken"]
         self.user_id = data["User"]["Id"]
-        self._session.headers.update({"X-Emby-Token": self.api_key})
+        self._session.headers["Authorization"] = _auth_header(self.api_key)
 
     def server_info(self) -> dict:
         """Name und Version des Servers (ohne Anmeldung) - zugleich ein Test,
@@ -107,10 +114,10 @@ class JellyfinClient:
 
     def login_with_token(self, token: str) -> None:
         """Übernimmt einen gespeicherten Token (Quick Connect) und prüft ihn."""
-        self._session.headers.update({"X-Emby-Token": token})
+        self._session.headers["Authorization"] = _auth_header(token)
         resp = self._session.get(f"{self.server_url}/Users/Me", timeout=10)
         if resp.status_code == 401:
-            self._session.headers.pop("X-Emby-Token", None)
+            self._session.headers["Authorization"] = _auth_header()
             raise RuntimeError(
                 "Die gespeicherte Anmeldung ist abgelaufen oder wurde widerrufen."
             )
@@ -299,7 +306,7 @@ class JellyfinClient:
         return f"{self.server_url}/Audio/{track_id}/stream?static=true"
 
     def stream_headers(self) -> List[str]:
-        return [f"X-Emby-Token: {self.api_key}"]
+        return [f"Authorization: {_auth_header(self.api_key)}"]
 
     def logout(self) -> None:
         """Meldet den Token beim Server ab - sonst bliebe nach jedem Start ein
