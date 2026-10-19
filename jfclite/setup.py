@@ -107,6 +107,27 @@ def _quick_connect_login(client: JellyfinClient, config: dict) -> bool:
     return True
 
 
+def _ask_discord(config: dict) -> None:
+    """Optional: Application-ID für die Anzeige in Discord ("Hört ...")."""
+    current = config.get("discord_client_id", "")
+    print("Optional: in Discord (auch Equibop, Vesktop) anzeigen, was läuft.")
+    print("Dafür unter https://discord.com/developers/applications eine Anwendung")
+    print("anlegen (ihr Name wird angezeigt) und hier ihre Application-ID eingeben.")
+    hint = f"Enter = behalten, - = entfernen) [{current}]" if current else "Enter = keine)"
+    while True:
+        answer = input(f"Discord-Application-ID ({hint}: ").strip()
+        if answer == "-":
+            config.pop("discord_client_id", None)
+            break
+        if not answer:
+            break  # bisherige behalten (oder weiter keine)
+        if answer.isdigit() and 17 <= len(answer) <= 20:
+            config["discord_client_id"] = answer
+            break
+        print("  Die ID besteht nur aus Ziffern (17-20 Stellen).")
+    print()
+
+
 def run_setup(existing: Optional[dict] = None) -> dict:
     """Fragt Serveradresse und Anmeldeart ab, prüft alles gegen den Server und
     gibt die fertige Config zurück (bestehende Einstellungen bleiben erhalten)."""
@@ -130,5 +151,7 @@ def run_setup(existing: Optional[dict] = None) -> dict:
     # Jellyfin-Sitzung von der Prüfung wieder schließen; beim Start meldet sich
     # run.py selbst an (bei Quick Connect bleibt der Token gültig)
     client.logout()
-    print("Angemeldet. Die Einstellungen (Autoplay usw.) öffnest du im Player mit [s].\n")
+    print("Angemeldet.\n")
+    _ask_discord(config)
+    print("Fertig. Die Einstellungen (Autoplay usw.) öffnest du im Player mit [s].\n")
     return config
