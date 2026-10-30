@@ -164,12 +164,11 @@ class DiscordPresence:
         }
         if not paused and dur:
             activity["timestamps"] = {"start": start * 1000, "end": round(start + dur) * 1000}
-        if self._cover_base:
+        if self._cover_base and track.cover_id:
             # Jellyfin liefert Bilder ohne Anmeldung aus - die Adresse enthält
             # also weder Passwort noch Token (Discord zeigt sie öffentlich).
-            item = track.album_id or track.id
             assets = {
-                "large_image": f"{self._cover_base}/Items/{item}/Images/Primary"
+                "large_image": f"{self._cover_base}/Items/{track.cover_id}/Images/Primary"
                 "?fillWidth=300&fillHeight=300&quality=85"
             }
             if track.album:

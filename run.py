@@ -6,9 +6,10 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from jfclite import CACHE_DIR, CONFIG_DIR, NAME, STATE_DIR
+from jfclite.i18n import set_language, t
 from jfclite.player import MPVPlayer, find_mpv
 
 OLD_NAME = "jellyfin-tui-lite"  # Name bis 0.1.x
@@ -54,69 +55,100 @@ def load_config() -> Optional[dict]:
     if not data.strip():
         return None
     try:
-        return json.loads(data)
+        config = json.loads(data)
     except UnicodeDecodeError:
-        print(f"{path} ist nicht als UTF-8 gespeichert. Im Editor beim")
-        print("Speichern die Codierung UTF-8 wählen.")
+        print(t("{path} ist nicht als UTF-8 gespeichert. Im Editor beim", path=path))
+        print(t("Speichern die Codierung UTF-8 wählen."))
         sys.exit(1)
     except json.JSONDecodeError as exc:
-        print(f"Fehler in {path}, Zeile {exc.lineno}, Spalte {exc.colno}: {exc.msg}")
+        print(t("Fehler in {path}, Zeile {line}, Spalte {column}: {error}", path=path, line=exc.lineno, column=exc.colno, error=exc.msg))
         if "escape" in exc.msg:
-            print(r'In Pfaden \ verdoppeln oder / nehmen: "C:\\mpv\\mpv.exe" oder "C:/mpv/mpv.exe"')
+            print(t(r'In Pfaden \ verdoppeln oder / nehmen: "C:\\mpv\\mpv.exe" oder "C:/mpv/mpv.exe"'))
             sys.exit(1)
-        print("Häufigste Ursache: am Ende der Zeile DAVOR fehlt ein Komma.")
-        print("Jede Zeile außer der letzten vor } muss mit , enden, z.B.:")
+        print(t("Häufigste Ursache: am Ende der Zeile DAVOR fehlt ein Komma."))
+        print(t("Jede Zeile außer der letzten vor } muss mit , enden, z.B.:"))
         print('  "password": "...",')
         print('  "discord_client_id": "123456789012345678"')
         sys.exit(1)
+    if not isinstance(config, dict):
+        print(
+            t(
+                "{path} enthält kein JSON-Objekt. Datei korrigieren oder löschen, beim\n"
+                "nächsten Start läuft dann die Einrichtung.",
+                path=path,
+            )
+        )
+        sys.exit(1)
+    return config
+
+
+def missing_settings(config: dict) -> List[str]:
+    """Was in der Config fehlt, um sich anmelden zu können (das Passwort darf
+    leer sein, Jellyfin erlaubt Benutzer ohne)."""
+    missing = [] if isinstance(config.get("server_url"), str) and config["server_url"] else ["server_url"]
+    if not config.get("access_token"):
+        if not config.get("username") or not isinstance(config["username"], str):
+            missing.append("username")
+        if not isinstance(config.get("password"), str):
+            missing.append("password")
+    return missing
 
 
 def config_hint() -> str:
     path = find_config_path()
     XDG_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    intro = t(
+        "Am einfachsten einmal im Terminal starten: die Einrichtung meldet dich per\n"
+        "Quick Connect an, ganz ohne Passwort in der Datei. Von Hand geht es auch:"
+    )
     if WINDOWS or path.exists():
         if path.exists():
-            head = f"{path} ist leer (vielleicht nicht gespeichert?)."
+            head = t("{path} ist leer (vielleicht nicht gespeichert?).", path=path)
         else:
             head = (
-                "Keine Konfiguration gefunden. Zum Anlegen das hier eingeben, Notepad\n"
-                "fragt dann, ob es die Datei erstellen soll (Ja):\n"
-                f'  notepad "{path}"'
+                t(
+                    "Keine Konfiguration gefunden. Zum Anlegen das hier eingeben, Notepad\n"
+                    "fragt dann, ob es die Datei erstellen soll (Ja):\n"
+                )
+                + f'  notepad "{path}"'
             )
         return (
-            f"{head}\n"
-            "Hinein kommt, mit deinen Daten:\n"
-            "  {\n"
+            f"{intro}\n\n{head}\n"
+            + t("Hinein kommt, mit deinen Daten:\n")
+            + "  {\n"
             '    "server_url": "http://192.168.1.10:8096",\n'
-            '    "username": "dein-name",\n'
-            '    "password": "dein-passwort"\n'
+            '    "username": "your-name",\n'
+            '    "password": "your-password"\n'
             "  }"
         )
-    lines = [f"Keine Konfiguration gefunden. Bitte {path} anlegen, z.B.:"]
+    lines = [intro, "", t("Keine Konfiguration gefunden. Bitte {path} anlegen, z.B.:", path=path)]
     lines.append(f"  mkdir -p {XDG_CONFIG_DIR}")
     if EXAMPLE_PATH.exists():
         lines.append(f"  cp {EXAMPLE_PATH} {path}")
     else:
         lines.append(f'  echo \'{{"server_url": "http://IP:8096", "username": "...", "password": "..."}}\' > {path}')
-    lines.append(f"  nano {path}   # Serveradresse, Benutzername, Passwort eintragen")
+    lines.append(f"  nano {path}   # " + t("Serveradresse, Benutzername, Passwort eintragen"))
     return "\n".join(lines)
 
 
 def mpv_hint(configured: Optional[str]) -> str:
     if configured:
-        return f'"mpv_path" in der Konfiguration zeigt auf {configured},\naber dort liegt kein mpv.'
+        return t('"mpv_path" in der Konfiguration zeigt auf {path},\naber dort liegt kein mpv.', path=configured)
     if WINDOWS:
         return (
-            "mpv fehlt. Am einfachsten im Terminal:\n"
-            "  winget install shinchiro.mpv\n"
-            "Oder von https://mpv.io/installation/ die Windows-Version von shinchiro\n"
-            f"holen (mpv-x86_64-...7z) und entpacken nach {HERE}\n"
-            "Beides findet der Player von selbst. Liegt mpv woanders, in der\n"
-            'config.json "mpv_path": "C:/Pfad/zu/mpv.exe" eintragen.'
+            t("mpv fehlt. Am einfachsten im Terminal:\n")
+            + "  winget install shinchiro.mpv\n"
+            + t(
+                "Oder von https://mpv.io/installation/ die Windows-Version von shinchiro\n"
+                "holen (mpv-x86_64-...7z) und entpacken nach {path}\n"
+                "Beides findet der Player von selbst. Liegt mpv woanders, in der\n"
+                'config.json "mpv_path": "C:/Pfad/zu/mpv.exe" eintragen.',
+                path=HERE,
+            )
         )
     if sys.platform == "darwin":
-        return "mpv fehlt. Installieren mit:\n  brew install mpv"
-    return "mpv fehlt. Installieren, z.B.:\n  sudo apt install mpv   (Fedora: dnf, Arch: pacman)"
+        return t("mpv fehlt. Installieren mit:\n") + "  brew install mpv"
+    return t("mpv fehlt. Installieren, z.B.:\n") + "  sudo apt install mpv   (Fedora: dnf, Arch: pacman)"
 
 
 def packages_hint() -> Optional[str]:
@@ -126,15 +158,16 @@ def packages_hint() -> Optional[str]:
     if not missing:
         return None
     if WINDOWS:
-        return (
-            f"Es fehlen Python-Pakete ({', '.join(missing)}). Starte den Player mit\n"
-            "jellyfin-client-lite.cmd (Doppelklick), das richtet sie beim ersten Mal ein."
+        return t(
+            "Es fehlen Python-Pakete ({packages}). Starte den Player mit\n"
+            "jellyfin-client-lite.cmd (Doppelklick), das richtet sie beim ersten Mal ein.",
+            packages=", ".join(missing),
         )
-    lines = [f"Es fehlen Python-Pakete ({', '.join(missing)}). Einmalig in {HERE}:"]
+    lines = [t("Es fehlen Python-Pakete ({packages}). Einmalig in {path}:", packages=", ".join(missing), path=HERE)]
     if not (HERE / ".venv").is_dir():
         lines.append("  python3 -m venv .venv")
     lines.append("  .venv/bin/python -m pip install -r requirements.txt")
-    lines.append("Danach so starten:\n  .venv/bin/python run.py")
+    lines.append(t("Danach so starten:\n") + "  .venv/bin/python run.py")
     return "\n".join(lines)
 
 
@@ -150,7 +183,10 @@ def setup_command() -> str:
 
 def main() -> None:
     migrate_old_dirs()
+    # Vor dem Import von jfclite.app: dort werden die Tastenkürzel schon übersetzt
+    # (Meldungen bis hierher gehen nach der Systemsprache)
     config = load_config()
+    set_language((config or {}).get("language"))
     force_setup = "--setup" in sys.argv
     mpv_path = (config or {}).get("mpv_path")
     mpv = find_mpv(mpv_path)
@@ -180,7 +216,13 @@ def main() -> None:
         # Erster Start (oder --setup): Server und Anmeldung abfragen
         config = run_setup(config)
         save_config(config_path, config)
-        print(f"Gespeichert in {config_path}\n")
+        print(t("Gespeichert in {path}\n", path=config_path))
+
+    missing = missing_settings(config)
+    if missing:
+        print(t("In {path} fehlt: {fields}", path=config_path, fields=", ".join(missing)))
+        print(t("Neu einrichten mit:  {command}", command=setup_command()))
+        sys.exit(1)
 
     client = JellyfinClient(server_url=config["server_url"])
     try:
@@ -189,12 +231,12 @@ def main() -> None:
         else:
             client.login(config["username"], config["password"])
     except (requests.ConnectionError, requests.Timeout):
-        print(f"Jellyfin unter {config['server_url']} ist nicht erreichbar.")
-        print("Stimmt die Adresse in der Konfiguration, und läuft der Server?")
+        print(t("Jellyfin unter {url} ist nicht erreichbar.", url=config["server_url"]))
+        print(t("Stimmt die Adresse in der Konfiguration, und läuft der Server?"))
         sys.exit(1)
     except Exception as exc:
-        print(f"Anmeldung bei Jellyfin fehlgeschlagen: {exc}")
-        print(f"Neu einrichten mit:  {setup_command()}")
+        print(t("Anmeldung bei Jellyfin fehlgeschlagen: {error}", error=exc))
+        print(t("Neu einrichten mit:  {command}", command=setup_command()))
         sys.exit(1)
 
     presence = None
@@ -228,7 +270,7 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except KeyboardInterrupt:
-        print("\nBeendet.")
+        print(t("\nBeendet."))
         sys.exit(0)
     except Exception:
         import traceback

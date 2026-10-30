@@ -16,6 +16,7 @@ from typing import Optional
 import requests
 
 from .client import JellyfinClient
+from .i18n import t
 
 QUICK_CONNECT_TIMEOUT = 300  # Sekunden, so lange gilt ein Code auf dem Server
 
@@ -46,30 +47,36 @@ def _normalize_url(url: str) -> str:
 
 def _ask_server(default: str) -> JellyfinClient:
     while True:
-        url = _normalize_url(_ask("Serveradresse (z.B. 192.168.1.10:8096)", default))
+        url = _normalize_url(_ask(t("Serveradresse (z.B. 192.168.1.10:8096)"), default))
         if not url:
             continue
         client = JellyfinClient(url)
         try:
             info = client.server_info()
         except requests.RequestException as exc:
-            print(f"  Keine Verbindung zu {url}: {type(exc).__name__}")
-            print("  Adresse und Port prüfen (Jellyfin nutzt meist :8096).\n")
+            print(t("  Keine Verbindung zu {url}: {error}", url=url, error=type(exc).__name__))
+            print(t("  Adresse und Port prüfen (Jellyfin nutzt meist :8096).\n"))
             continue
-        print(f"  Verbunden mit „{info.get('ServerName', '?')}“ (Jellyfin {info.get('Version', '?')})\n")
+        print(
+            t(
+                "  Verbunden mit „{name}“ (Jellyfin {version})\n",
+                name=info.get("ServerName", "?"),
+                version=info.get("Version", "?"),
+            )
+        )
         return client
 
 
 def _password_login(client: JellyfinClient, config: dict) -> bool:
-    username = _ask("Benutzername", config.get("username", ""))
-    password = getpass.getpass("Passwort (bleibt beim Tippen unsichtbar): ")
+    username = _ask(t("Benutzername"), config.get("username", ""))
+    password = getpass.getpass(t("Passwort (bleibt beim Tippen unsichtbar): "))
     try:
         client.login(username, password)
     except RuntimeError as exc:
         print(f"  {exc}\n")
         return False
     except requests.RequestException as exc:
-        print(f"  Anmeldung nicht möglich: {exc}\n")
+        print(t("  Anmeldung nicht möglich: {error}\n", error=exc))
         return False
     config.update(username=username, password=password)
     config.pop("access_token", None)
@@ -80,11 +87,12 @@ def _quick_connect_login(client: JellyfinClient, config: dict) -> bool:
     try:
         code, secret = client.quick_connect_start()
     except (RuntimeError, requests.RequestException) as exc:
-        print(f"  {exc}\n")
+        print(f"  {exc}")
+        print(t("  Alternative: Anmeldung mit Passwort (Auswahl 2).\n"))
         return False
-    print(f"\n  Dein Code:  {code}\n")
-    print("  In Jellyfin (Browser oder App) anmelden, dann")
-    print("  Benutzermenü → Quick Connect → Code eingeben. Abbruch mit Strg+C.")
+    print(t("\n  Dein Code:  {code}\n", code=code))
+    print(t("  In Jellyfin (Browser oder App) anmelden, dann"))
+    print(t("  Benutzermenü → Quick Connect → Code eingeben. Abbruch mit Strg+C."))
     deadline = time.monotonic() + QUICK_CONNECT_TIMEOUT
     try:
         while time.monotonic() < deadline:
@@ -93,13 +101,13 @@ def _quick_connect_login(client: JellyfinClient, config: dict) -> bool:
                 client.quick_connect_login(secret)
                 break
         else:
-            print("  Der Code ist abgelaufen.\n")
+            print(t("  Der Code ist abgelaufen.\n"))
             return False
     except KeyboardInterrupt:
-        print("\n  Abgebrochen.\n")
+        print(t("\n  Abgebrochen.\n"))
         return False
     except requests.RequestException as exc:
-        print(f"  Quick Connect fehlgeschlagen: {exc}\n")
+        print(t("  Quick Connect fehlgeschlagen: {error}\n", error=exc))
         return False
     config.update(access_token=client.api_key)
     config.pop("username", None)
@@ -110,10 +118,10 @@ def _quick_connect_login(client: JellyfinClient, config: dict) -> bool:
 def _ask_discord(config: dict) -> None:
     """Optional: Application-ID für die Anzeige in Discord ("Hört ...")."""
     current = config.get("discord_client_id", "")
-    print("Optional: in Discord (auch Equibop, Vesktop) anzeigen, was läuft.")
-    print("Dafür unter https://discord.com/developers/applications eine Anwendung")
-    print("anlegen (ihr Name wird angezeigt) und hier ihre Application-ID eingeben.")
-    hint = f"Enter = behalten, - = entfernen) [{current}]" if current else "Enter = keine)"
+    print(t("Optional: in Discord (auch Equibop, Vesktop) anzeigen, was läuft."))
+    print(t("Dafür unter https://discord.com/developers/applications eine Anwendung"))
+    print(t("anlegen (ihr Name wird angezeigt) und hier ihre Application-ID eingeben."))
+    hint = t("Enter = behalten, - = entfernen") + f") [{current}]" if current else t("Enter = keine") + ")"
     while True:
         answer = input(f"Discord-Application-ID ({hint}: ").strip()
         if answer == "-":
@@ -124,7 +132,7 @@ def _ask_discord(config: dict) -> None:
         if answer.isdigit() and 17 <= len(answer) <= 20:
             config["discord_client_id"] = answer
             break
-        print("  Die ID besteht nur aus Ziffern (17-20 Stellen).")
+        print(t("  Die ID besteht nur aus Ziffern (17-20 Stellen)."))
     print()
 
 
@@ -132,17 +140,22 @@ def run_setup(existing: Optional[dict] = None) -> dict:
     """Fragt Serveradresse und Anmeldeart ab, prüft alles gegen den Server und
     gibt die fertige Config zurück (bestehende Einstellungen bleiben erhalten)."""
     config = dict(existing or {})
-    print("Einrichtung von jellyfin-client-lite\n")
+    print(t("Einrichtung von jellyfin-client-lite\n"))
     client = _ask_server(config.get("server_url", ""))
     config["server_url"] = client.server_url
     while True:
-        print("Wie willst du dich anmelden?")
-        print("  1  Benutzername und Passwort")
-        print("  2  Quick Connect (Code in einem schon angemeldeten Jellyfin bestätigen)")
-        choice = _ask("Auswahl", "1")
-        if choice == "2":
+        print(t("Wie willst du dich anmelden?"))
+        print(
+            t(
+                "  1  Quick Connect (empfohlen: Code in einem schon angemeldeten Jellyfin bestätigen,\n"
+                "     es wird kein Passwort gespeichert)"
+            )
+        )
+        print(t("  2  Benutzername und Passwort (das Passwort liegt dann im Klartext in der Config)"))
+        choice = _ask(t("Auswahl"), "1")
+        if choice == "1":
             ok = _quick_connect_login(client, config)
-        elif choice == "1":
+        elif choice == "2":
             ok = _password_login(client, config)
         else:
             continue
@@ -151,7 +164,7 @@ def run_setup(existing: Optional[dict] = None) -> dict:
     # Jellyfin-Sitzung von der Prüfung wieder schließen; beim Start meldet sich
     # run.py selbst an (bei Quick Connect bleibt der Token gültig)
     client.logout()
-    print("Angemeldet.\n")
+    print(t("Angemeldet.\n"))
     _ask_discord(config)
-    print("Fertig. Die Einstellungen (Autoplay usw.) öffnest du im Player mit [s].\n")
+    print(t("Fertig. Die Einstellungen (Autoplay usw.) öffnest du im Player mit [s].\n"))
     return config

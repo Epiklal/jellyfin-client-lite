@@ -24,8 +24,9 @@ from textual.widgets import (
 )
 
 from . import NAME
-from .client import JellyfinClient, Track, shuffled, sorted_tracks
+from .client import JellyfinClient, Track, album_tracks, shuffled, sorted_tracks
 from .discord import DiscordPresence
+from .i18n import t
 from .player import MPVPlayer
 from .widgets import (
     Control,
@@ -196,7 +197,7 @@ SettingsScreen {{
 }}
 
 #settings {{
-    width: 60;
+    width: 66;
     height: auto;
     border: round {ACCENT};
     padding: 1 2;
@@ -211,7 +212,6 @@ SettingsScreen {{
 
 #settings Horizontal {{
     height: auto;
-    margin-bottom: 1;
 }}
 
 #settings Horizontal Label {{
@@ -219,9 +219,13 @@ SettingsScreen {{
     padding-top: 1;
 }}
 
+/* Breit genug, dass kein Eintrag umbricht: sonst passt der Dialog nicht in 24 Zeilen */
+#settings Select {{
+    width: 36;
+}}
+
 #settings-buttons {{
     align-horizontal: right;
-    margin-bottom: 0;
 }}
 
 #settings-buttons Button {{
@@ -229,13 +233,14 @@ SettingsScreen {{
 }}
 """
 
-START_MODES = [("Zufällig gemischt", "shuffle"), ("Sortiert (Interpret, Album)", "sorted")]
+START_MODES = [(t("Zufällig gemischt"), "shuffle"), (t("Sortiert (Interpret, Album)"), "sorted")]
+LANGUAGES = [(t("Automatisch"), "auto"), ("Deutsch", "de"), ("English", "en")]
 
 
 class SettingsScreen(ModalScreen[Optional[dict]]):
     """Einstellungen; Ergebnis ist das geänderte Dict oder None bei Abbruch."""
 
-    BINDINGS = [("escape", "dismiss(None)", "Abbrechen")]
+    BINDINGS = [("escape", "dismiss(None)", t("Abbrechen"))]
 
     def __init__(self, settings: dict) -> None:
         super().__init__()
@@ -243,27 +248,35 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings"):
-            yield Label("Einstellungen", id="settings-title")
+            yield Label(t("Einstellungen"), id="settings-title")
             with Horizontal():
-                yield Label("Autoplay (beim Start sofort abspielen)")
+                yield Label(t("Autoplay (beim Start sofort abspielen)"))
                 yield Switch(self._settings["autoplay"], id="set-autoplay")
             with Horizontal():
-                yield Label("Cover neben dem Titel anzeigen")
+                yield Label(t("Cover neben dem Titel anzeigen"))
                 yield Switch(self._settings["show_cover"], id="set-cover")
             with Horizontal():
-                yield Label("Songtext anzeigen")
+                yield Label(t("Songtext anzeigen"))
                 yield Switch(self._settings["show_lyrics"], id="set-lyrics")
             with Horizontal():
-                yield Label("Beim Start: Reihenfolge")
+                yield Label(t("Beim Start: Reihenfolge"))
                 yield Select(
                     START_MODES,
                     value=self._settings["start_mode"],
                     allow_blank=False,
                     id="set-start-mode",
                 )
+            with Horizontal():
+                yield Label(t("Sprache"))
+                yield Select(
+                    LANGUAGES,
+                    value=self._settings["language"],
+                    allow_blank=False,
+                    id="set-language",
+                )
             with Horizontal(id="settings-buttons"):
-                yield Button("Abbrechen", id="cancel")
-                yield Button("Speichern", id="save", variant="primary")
+                yield Button(t("Abbrechen"), id="cancel")
+                yield Button(t("Speichern"), id="save", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
@@ -273,6 +286,7 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
                     "show_cover": self.query_one("#set-cover", Switch).value,
                     "show_lyrics": self.query_one("#set-lyrics", Switch).value,
                     "start_mode": self.query_one("#set-start-mode", Select).value,
+                    "language": self.query_one("#set-language", Select).value,
                 }
             )
         else:
@@ -285,21 +299,22 @@ class JellyfinClientLite(App):
     AUTO_FOCUS = "#tracks"
     BINDINGS = [
         ("space", "toggle_pause", "Play/Pause"),
-        ("n", "next_track", "Nächster Titel"),
-        ("p", "prev_track", "Vorheriger Titel"),
+        ("n", "next_track", t("Nächster Titel")),
+        ("p", "prev_track", t("Vorheriger Titel")),
         ("left", "seek_back", "-10s"),
         ("right", "seek_fwd", "+10s"),
-        ("r", "reshuffle", "Neu mischen"),
+        ("r", "reshuffle", t("Neu mischen")),
         # priority: sonst landet der "/" nach dem Fokuswechsel noch im Suchfeld
-        Binding("slash", "search", "Suche", priority=True),
-        ("l", "toggle_lyrics", "Songtext"),
+        Binding("slash", "search", t("Suche"), priority=True),
+        ("a", "show_album", "Album"),
+        ("l", "toggle_lyrics", t("Songtext")),
         ("c", "toggle_cover", "Cover"),
-        ("s", "settings", "Einstellungen"),
-        Binding("escape", "close_search", "Suche schließen", show=False),
-        ("plus", "vol_up", "Lauter"),
-        Binding("=", "vol_up", "Lauter", show=False),  # US-Layout
-        ("-", "vol_down", "Leiser"),
-        ("q", "quit", "Beenden"),
+        ("s", "settings", t("Einstellungen")),
+        Binding("escape", "close_search", t("Suche schließen"), show=False),
+        ("plus", "vol_up", t("Lauter")),
+        Binding("=", "vol_up", t("Lauter"), show=False),  # US-Layout
+        ("-", "vol_down", t("Leiser")),
+        ("q", "quit", t("Beenden")),
     ]
 
     def __init__(
@@ -332,6 +347,7 @@ class JellyfinClientLite(App):
         self.shown = self.queue  # was die Tabelle zeigt: die Queue oder Suchtreffer
         self._ordered_shuffle = True
         self.search_active = False  # Queue besteht nur aus Suchtreffern
+        self._album_name: Optional[str] = None  # Tabelle zeigt gerade dieses Album
         self._search_timer = None
         self._extras_for = ""  # Titel, für den Cover/Songtext geladen (werden)
         self._covers: dict = {}  # Cover-ID -> fertig gerendertes Bild (None = keins)
@@ -351,15 +367,15 @@ class JellyfinClientLite(App):
                 # disabled, solange es unsichtbar ist: sonst bekäme es den Start-
                 # fokus bzw. käme per Tab dran
                 search = Input(
-                    placeholder="Suche in Titel, Interpret, Album ...",
+                    placeholder=t("Suche in Titel, Interpret, Album ..."),
                     id="search",
                     disabled=True,
                 )
-                search.border_title = "Suche"
-                search.border_subtitle = "Enter = zur Liste, Esc = schließen"
+                search.border_title = t("Suche")
+                search.border_subtitle = t("Enter = zur Liste, Esc = schließen")
                 yield search
                 table = TrackTable(id="tracks", cursor_type="row")
-                table.border_subtitle = "Klick oder Enter = abspielen"
+                table.border_subtitle = t("Klick oder Enter = abspielen")
                 yield table
             with Vertical(id="side"):
                 with Vertical(id="queue-panel"):
@@ -370,14 +386,14 @@ class JellyfinClientLite(App):
         with Horizontal(id="now-playing"):
             yield CoverArt(id="cover")
             with Vertical(id="np-info"):
-                yield Static("Lade Bibliothek ...", id="np-title", markup=False)
+                yield Static(t("Lade Bibliothek ..."), id="np-title", markup=False)
                 yield Static("", id="np-sub", markup=False)
                 yield SeekBar(ACCENT, id="np-progress")
                 with Horizontal(id="controls"):
                     yield Control("⏮", "prev_track")
                     yield Control("⏸", "toggle_pause", id="btn-play")
                     yield Control("⏭", "next_track")
-                    yield Control("⇄ Mischen", "reshuffle")
+                    yield Control(t("⇄ Mischen"), "reshuffle")
                     yield Static(id="controls-spacer")
                     yield Control("−", "vol_down")
                     yield VolumeBar(ACCENT)
@@ -386,15 +402,15 @@ class JellyfinClientLite(App):
 
     def on_mount(self) -> None:
         table = self.main.query_one("#tracks", DataTable)
-        table.add_columns("Titel", "Interpret", "Album", "Dauer")
+        table.add_columns(t("Titel"), t("Interpret"), "Album", t("Dauer"))
         self._update_title()
-        self.main.query_one("#lyrics-panel").border_title = "Songtext"
+        self.main.query_one("#lyrics-panel").border_title = t("Songtext")
         if self.config.get("show_cover", True) and not cover_supported():
-            self.notify("Für Cover fehlt Pillow:  pip install pillow", severity="warning")
+            self.notify(t("Für Cover fehlt Pillow:  pip install pillow"), severity="warning")
         self._apply_view()
-        self.main.query_one("#np-title", Static).update("Lade Bibliothek ...")
+        self.main.query_one("#np-title", Static).update(t("Lade Bibliothek ..."))
         self.main.query_one("#np-sub", Static).update(
-            "Kann bei großen Bibliotheken oder über VPN/Tunnel einen Moment dauern."
+            t("Kann bei großen Bibliotheken oder über VPN/Tunnel einen Moment dauern.")
         )
         self._start_loading()
         self.set_interval(1.0, self._tick)
@@ -433,15 +449,15 @@ class JellyfinClientLite(App):
             self._loading = False
 
     def _on_library_error(self, exc: Exception) -> None:
-        self.main.query_one("#np-title", Static).update("⚠ Bibliothek konnte nicht geladen werden")
+        self.main.query_one("#np-title", Static).update(t("⚠ Bibliothek konnte nicht geladen werden"))
         self.main.query_one("#np-sub", Static).update(
-            f"{type(exc).__name__}: {exc}  —  [r] zum erneuten Versuch"
+            f"{type(exc).__name__}: {exc}  —  " + t("[r] zum erneuten Versuch")
         )
 
     def _on_library_loaded(self, tracks: List[Track]) -> None:
         if not tracks:
             self.main.query_one("#np-title", Static).update(
-                "Keine Titel in der Jellyfin-Bibliothek gefunden."
+                t("Keine Titel in der Jellyfin-Bibliothek gefunden.")
             )
             return
         self.all_tracks = tracks
@@ -452,7 +468,7 @@ class JellyfinClientLite(App):
             self._play_next()
         else:
             self.main.query_one("#np-title", Static).update(
-                f"{len(tracks)} Titel geladen - Leertaste oder Enter zum Abspielen"
+                t("{n} Titel geladen - Leertaste oder Enter zum Abspielen", n=len(tracks))
             )
             self.main.query_one("#np-sub", Static).update("")
 
@@ -461,9 +477,9 @@ class JellyfinClientLite(App):
         try:
             self.player = MPVPlayer()
         except Exception as exc:
-            self.main.query_one("#np-title", Static).update("⚠ mpv ließ sich nicht starten")
+            self.main.query_one("#np-title", Static).update(t("⚠ mpv ließ sich nicht starten"))
             self.main.query_one("#np-sub", Static).update(
-                f"{exc}  —  Leertaste für neuen Versuch"
+                f"{exc}  —  " + t("Leertaste für neuen Versuch")
             )
             return False
         self.player.set_http_headers(self.client.stream_headers())
@@ -476,15 +492,15 @@ class JellyfinClientLite(App):
         self.player.shutdown()
         self.player = None
         now = time.monotonic()
-        self._crashes = [t for t in self._crashes if now - t < 60] + [now]
+        self._crashes = [c for c in self._crashes if now - c < 60] + [now]
         if len(self._crashes) > MAX_RESTARTS:
-            self.main.query_one("#np-title", Static).update("⚠ mpv stürzt immer wieder ab")
+            self.main.query_one("#np-title", Static).update(t("⚠ mpv stürzt immer wieder ab"))
             self.main.query_one("#np-sub", Static).update(
-                f"Details stehen in {log_path}  —  Leertaste für neuen Versuch"
+                t("Details stehen in {path}  —  Leertaste für neuen Versuch", path=log_path)
             )
             return
         self.notify(
-            f"mpv wurde unerwartet beendet (Exit-Code {code}) und neu gestartet.",
+            t("mpv wurde unerwartet beendet (Exit-Code {code}) und neu gestartet.", code=code),
             severity="warning",
         )
         if self._start_player() and self.current_index >= 0 and not self._halted:
@@ -498,14 +514,14 @@ class JellyfinClientLite(App):
         self.all_tracks = tracks
         if self.current_index < 0:
             self._reshuffle(tracks)  # es läuft noch nichts (Autoplay aus)
-            self.notify(f"Bibliothek aktualisiert: {len(tracks)} Titel")
+            self.notify(t("Bibliothek aktualisiert: {n} Titel", n=len(tracks)))
             return
         current = self.queue[self.current_index]
         self._reshuffle(tracks, first=current)
         self.current_index = 0
         self._update_neighbors()
         self._show_current()
-        self.notify(f"Bibliothek aktualisiert: {len(tracks)} Titel")
+        self.notify(t("Bibliothek aktualisiert: {n} Titel", n=len(tracks)))
 
     def _reshuffle(
         self,
@@ -521,9 +537,10 @@ class JellyfinClientLite(App):
         )
         self.queue = shuffled(tracks) if self._ordered_shuffle else sorted_tracks(tracks)
         if first is not None:
-            self.queue = [first] + [t for t in self.queue if t.id != first.id]
+            self.queue = [first] + [track for track in self.queue if track.id != first.id]
         self.current_index = -1
         self.search_active = False
+        self._album_name = None
         search = self.main.query_one("#search", Input)
         if search.value:
             search.value = ""
@@ -539,40 +556,43 @@ class JellyfinClientLite(App):
         table.clear()
         # Text statt str: DataTable würde str als Markup lesen und z.B.
         # "[feat. Juice WRLD]" verschlucken; "ellipsis" kürzt mit "…".
-        for t in tracks:
+        for track in tracks:
             table.add_row(
-                Text(t.title, overflow="ellipsis"),
-                Text(t.artist, overflow="ellipsis"),
-                Text(t.album, overflow="ellipsis"),
-                t.duration_str,
-                key=t.id,
+                Text(track.title, overflow="ellipsis"),
+                Text(track.artist, overflow="ellipsis"),
+                Text(track.album, overflow="ellipsis"),
+                track.duration_str,
+                key=track.id,
             )
         table.set_wanted_widths(
             [
-                typical_width((t.title for t in tracks), "Titel"),
-                typical_width((t.artist for t in tracks), "Interpret"),
-                typical_width((t.album for t in tracks), "Album"),
-                max(len("Dauer"), max((len(t.duration_str) for t in tracks), default=0)),
+                typical_width((track.title for track in tracks), t("Titel")),
+                typical_width((track.artist for track in tracks), t("Interpret")),
+                typical_width((track.album for track in tracks), "Album"),
+                max(len(t("Dauer")), max((len(track.duration_str) for track in tracks), default=0)),
             ]
         )
 
     def _update_title(self) -> None:
         table = self.main.query_one(TrackTable)
-        if self.shown is not self.queue:
-            table.border_title = f"Suche: {len(self.shown)} Treffer"
+        if self._album_name is not None:
+            # Text statt str: der Rahmentitel würde str als Markup lesen
+            table.border_title = Text(f"Album: {self._album_name} ({len(self.shown)})")
+        elif self.shown is not self.queue:
+            table.border_title = t("Suche: {n} Treffer", n=len(self.shown))
         elif self.search_active:
-            table.border_title = f"Suchtreffer ({len(self.queue)})"
+            table.border_title = t("Suchtreffer ({n})", n=len(self.queue))
         elif self._ordered_shuffle:
-            table.border_title = "Alle Titel (zufällige Reihenfolge)"
+            table.border_title = t("Alle Titel (zufällige Reihenfolge)")
         else:
-            table.border_title = "Alle Titel (sortiert)"
+            table.border_title = t("Alle Titel (sortiert)")
 
     def _refresh_queue_panel(self) -> None:
         lv = self.main.query_one("#queue-list", ListView)
         lv.clear()
         upcoming = self.queue[self.current_index + 1 : self.current_index + 21]
-        for t in upcoming:
-            lv.append(ListItem(Label(f"{t.title} - {t.artist}", markup=False)))
+        for track in upcoming:
+            lv.append(ListItem(Label(f"{track.title} - {track.artist}", markup=False)))
 
     def _play_track(self, index: int) -> None:
         if not (0 <= index < len(self.queue)) or self.player is None:
@@ -661,10 +681,13 @@ class JellyfinClientLite(App):
         self.player.failures = 0
         self._halted = True
         self._refresh_status()
-        self.main.query_one("#np-title", Static).update("⚠ Server liefert keine Titel")
+        self.main.query_one("#np-title", Static).update(t("⚠ Server liefert keine Titel"))
         self.main.query_one("#np-sub", Static).update(
-            f"{MAX_FAILURES} Titel hintereinander ließen sich nicht laden. "
-            "Wiedergabe angehalten - Leertaste für neuen Versuch."
+            t(
+                "{n} Titel hintereinander ließen sich nicht laden. "
+                "Wiedergabe angehalten - Leertaste für neuen Versuch.",
+                n=MAX_FAILURES,
+            )
         )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -759,7 +782,7 @@ class JellyfinClientLite(App):
             if self._save_config:
                 self._save_config()
         except OSError as exc:
-            self.notify(f"Speichern fehlgeschlagen: {exc}", severity="error")
+            self.notify(t("Speichern fehlgeschlagen: {error}", error=exc), severity="error")
         self._apply_view()
 
     def action_toggle_lyrics(self) -> None:
@@ -770,7 +793,7 @@ class JellyfinClientLite(App):
         if isinstance(self.screen, SettingsScreen):
             return
         if not cover_supported():
-            self.notify("Für Cover fehlt Pillow:  pip install pillow", severity="warning")
+            self.notify(t("Für Cover fehlt Pillow:  pip install pillow"), severity="warning")
             return
         self._toggle_setting("show_cover")
 
@@ -784,17 +807,19 @@ class JellyfinClientLite(App):
         self._extras_for = track.id
         self._lyrics, self._lyric_line = [], -1
         if self.show_lyrics:
-            self._show_lyrics_text("Lade Songtext ...")
+            self._show_lyrics_text(t("Lade Songtext ..."))
             self.run_worker(
                 lambda: self._fetch_lyrics(track), thread=True, exit_on_error=False,
                 group="lyrics", exclusive=True,
             )
         if self.show_cover:
-            cover_id = track.album_id or track.id
+            cover_id = track.cover_id
             if cover_id in self._covers:
                 self.main.query_one(CoverArt).set_art(self._covers[cover_id])
             else:
                 self.main.query_one(CoverArt).set_art(None)
+                if not cover_id:
+                    return
                 self.run_worker(
                     lambda: self._fetch_cover(track, cover_id), thread=True,
                     exit_on_error=False, group="cover", exclusive=True,
@@ -830,7 +855,7 @@ class JellyfinClientLite(App):
             return
         self._lyrics, self._lyric_line = lines, -1
         if not lines:
-            self._show_lyrics_text("Kein Songtext vorhanden.")
+            self._show_lyrics_text(t("Kein Songtext vorhanden."))
             return
         self._render_lyrics()
         self._sync_lyrics()
@@ -876,9 +901,27 @@ class JellyfinClientLite(App):
         search.add_class("visible")
         search.focus()
 
+    def action_show_album(self) -> None:
+        """Zeigt das Album des markierten Titels, in Titelreihenfolge. Spielen
+        klappt wie bei Suchtreffern, Esc führt zurück zur ganzen Bibliothek."""
+        if not self.shown or isinstance(self.screen, SettingsScreen):
+            return
+        table = self.main.query_one(TrackTable)
+        track = self.shown[table.cursor_row]
+        if not track.album:
+            self.notify(t("Dieser Titel gehört zu keinem Album."))
+            return
+        # Eine noch ausstehende Suche überschriebe sonst gleich die Album-Ansicht
+        if self._search_timer is not None:
+            self._search_timer.stop()
+        hits = album_tracks(self.all_tracks, track) or [track]
+        self._album_name = track.album
+        self._fill_table(hits)
+        table.move_cursor(row=next(i for i, hit in enumerate(hits) if hit.id == track.id))
+
     def action_close_search(self) -> None:
         search = self.main.query_one("#search", Input)
-        if not search.has_class("visible"):
+        if not search.has_class("visible") and self._album_name is None:
             return
         if self._search_timer is not None:
             self._search_timer.stop()
@@ -903,15 +946,17 @@ class JellyfinClientLite(App):
             self._end_search()
             return
         hits = [
-            t
-            for t in self.all_tracks
-            if all(w in f"{t.title} {t.artist} {t.album}".casefold() for w in words)
+            track
+            for track in self.all_tracks
+            if all(w in f"{track.title} {track.artist} {track.album}".casefold() for w in words)
         ]
+        self._album_name = None
         self._fill_table(hits)
 
     def _end_search(self) -> None:
         """Suche beendet: Tabelle zeigt wieder die ganze Queue. Lief ein Treffer,
         wird die Bibliothek mit ihm als erstem Titel neu geordnet."""
+        self._album_name = None
         if self.search_active:
             current = self.queue[self.current_index] if self.current_index >= 0 else None
             self._reshuffle(self.all_tracks, first=current)
@@ -932,6 +977,7 @@ class JellyfinClientLite(App):
             "show_cover": self.config.get("show_cover", True),
             "show_lyrics": self.config.get("show_lyrics", True),
             "start_mode": self.config.get("start_mode", "shuffle"),
+            "language": self.config.get("language") if self.config.get("language") in ("de", "en") else "auto",
         }
 
         def done(result: Optional[dict]) -> None:
@@ -942,10 +988,10 @@ class JellyfinClientLite(App):
                 if self._save_config:
                     self._save_config()
             except OSError as exc:
-                self.notify(f"Speichern fehlgeschlagen: {exc}", severity="error")
+                self.notify(t("Speichern fehlgeschlagen: {error}", error=exc), severity="error")
                 return
             self._apply_view()
-            self.notify("Gespeichert (Autoplay und Reihenfolge gelten ab dem nächsten Start).")
+            self.notify(t("Gespeichert (Autoplay, Reihenfolge und Sprache gelten ab dem nächsten Start)."))
 
         self.push_screen(SettingsScreen(current), done)
 

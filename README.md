@@ -12,8 +12,8 @@ has much to do.
 On my machine (Debian 13, KDE, ~3000 tracks) it sits at around 60 MB for the
 interface plus ~70 MB for mpv, and about 0.3 % of one CPU core while playing.
 
-> The interface is in German at the moment, since that's what I use. The
-> config and everything in this README apply either way.
+> The interface comes in English and German. It follows your system language;
+> set `"language"` in the config (or the settings dialog) to override that.
 
 ## What it does
 
@@ -25,10 +25,10 @@ interface plus ~70 MB for mpv, and about 0.3 % of one CPU core while playing.
 - remembers your library, so after the first run it starts in under a second
   and only reloads when something changed on the server
 - can show what you're listening to in Discord (optional)
-
-- shows the album cover next to the track name and the lyrics stored on your
+- shows the cover next to the track name and the lyrics stored on your
   server (synced lyrics highlight the current line); both can be switched off
 - search (`/`) across title, artist and album, and a settings dialog (`s`)
+- jump to the album of the selected track (`a`), in track order
 
 What it doesn't do: browsing albums or playlists. That's on purpose, there
 are bigger clients for that.
@@ -107,15 +107,23 @@ Tested on Windows 11 with mpv from winget, so far only in a VM.
 ## First start
 
 If there's no config yet, the player asks for your server address (it checks
-that it's reachable and shows the server's name) and then lets you log in
-either with username and password or with **Quick Connect**: you get a code
-and confirm it in a Jellyfin that's already logged in (user menu → Quick
-Connect). With Quick Connect no password is stored, only an access token.
-Run `python run.py --setup` to do this again later.
+that it's reachable and shows the server's name) and then for a login:
+
+1. **Quick Connect (recommended):** you get a code and confirm it in a Jellyfin
+   that's already logged in (user menu → Quick Connect). No password is stored,
+   only an access token that you can revoke on the server. Quick Connect has to
+   be enabled on the server (it's a setting in the admin dashboard).
+2. **Username and password:** the fallback. The password ends up in plain text
+   in `config.json`, readable only by your user on Linux/macOS.
+
+To do this again later, run `python run.py --setup` (`.deb`:
+`jellyfin-client-lite --setup`, Windows: `jellyfin-client-lite.cmd --setup`).
 
 ## Config
 
-You can also write the file by hand. Create `~/.config/jellyfin-client-lite/config.json`
+You can also write the file by hand, which only works with a password, so the
+setup above is usually the better way. Create
+`~/.config/jellyfin-client-lite/config.json`
 (Windows: `%APPDATA%\jellyfin-client-lite\config.json`):
 
 ```json
@@ -141,23 +149,27 @@ comma at the end. The player tells you the line number if one is missing.
 Press `s` in the player, or edit the config:
 
 ```json
+"language": "auto",
 "autoplay": true,
 "start_mode": "shuffle",
 "show_cover": true,
 "show_lyrics": true
 ```
 
+- `language`: `"auto"` (system language), `"en"` or `"de"`. Applies from the
+  next start.
 - `autoplay`: start playing right away. If off, the library loads and waits;
   `Space` or `Enter` on a track starts it.
 - `show_cover` / `show_lyrics`: also toggled with `c` / `l`. Lyrics come from
   your Jellyfin server (it has to have them); the cover needs Pillow
   (`pip install pillow`, the `.deb` recommends `python3-pil`) and a terminal
   with true color.
-- `start_mode`: `"shuffle"` or `"sorted"` (by artist, album, title) for the
-  order the list has at startup. `r` always reshuffles.
+- `start_mode`: `"shuffle"` or `"sorted"` (by artist, album, track number) for
+  the order the list has at startup. `r` always reshuffles.
 
-Picking a search result plays through the results; closing the search
-brings back the whole library, continuing with the current track.
+Picking a search result plays through the results, and the same goes for an
+album opened with `a`. `Esc` brings back the whole library, continuing with the
+current track.
 
 ## Keys
 
@@ -168,6 +180,7 @@ brings back the whole library, continuing with the current track.
 | `←` / `→` | seek 10 s |
 | `r` | reshuffle |
 | `/` | search (live filter; `Enter` jumps to the results, `Esc` closes) |
+| `a` | show the album of the selected track (`Esc` goes back) |
 | `l` | show / hide lyrics |
 | `c` | show / hide cover |
 | `s` | settings |
@@ -180,16 +193,22 @@ the footer.
 
 ## Media keys and the desktop widget
 
-On Linux: install `mpv-mpris` and restart the player. `playerctl -l` should
-list `mpv` while it's running. If not, check
-`~/.local/state/jellyfin-client-lite/mpv.log`: every start adds a few lines
-there, including whether the plugin was found.
+The player doesn't handle media keys itself, mpv does, so how well this works
+depends on your platform:
 
-On Windows there's nothing to install: mpv shows up in the Windows media
-controls by itself, so the media keys and the media flyout just work.
-Logs are in `%LOCALAPPDATA%\jellyfin-client-lite\logs`.
+| Platform | What you need | Status |
+|---|---|---|
+| Linux | the `mpv-mpris` package | tested on the distros listed above |
+| Windows | nothing, mpv talks to the Windows media controls | tested on Windows 11, so far only in a VM |
+| macOS | nothing, mpv should do it by itself | untested, I don't own a Mac |
 
-On macOS mpv should do the same, but I haven't been able to check that.
+Without `mpv-mpris` on Linux, the player still works, but media keys and the
+desktop widget do nothing.
+
+On Linux, `playerctl -l` should list `mpv` while the player is running. If not,
+check `~/.local/state/jellyfin-client-lite/mpv.log`: every start adds a few
+lines there, including whether the plugin was found.
+On Windows the logs are in `%LOCALAPPDATA%\jellyfin-client-lite\logs`.
 
 ## Discord
 
@@ -221,10 +240,12 @@ address. Problems end up in `~/.local/state/jellyfin-client-lite/discord.log`.
 
 ## Security notes
 
-- Your password is only stored in `config.json`. The access token never
-  shows up in a URL: mpv gets it as an HTTP header, so it doesn't leak
-  through MPRIS (media widgets, KDE Connect, ...) and it's never sent to
-  Discord.
+- With Quick Connect, `config.json` only holds an access token, which you can
+  revoke on the server. With a password login, the password is stored there in
+  plain text and nowhere else. Either way, the file is written readable only by
+  your user. The access token never shows up in a URL: mpv gets it as an HTTP
+  header, so it doesn't leak through MPRIS (media widgets, KDE Connect, ...)
+  and it's never sent to Discord.
 - Control characters in track tags get stripped, so a file with weird tags
   can't mess with your terminal.
 - Jellyfin itself serves audio streams and cover images without a login if
@@ -232,14 +253,23 @@ address. Problems end up in `~/.local/state/jellyfin-client-lite/discord.log`.
   server is public, you might want to only expose `/Items/*/Images/*` through
   your reverse proxy (enough for Discord covers) and keep the rest behind a
   VPN.
-- With `http://` in `server_url`, your password goes over the network in
-  plain text. Fine on your own wired network, less so on shared wifi.
+- With `http://` in `server_url`, your password or token goes over the network
+  in plain text. Fine on your own wired network, less so on shared wifi.
 
 ## Transparent background
 
 The app doesn't paint its own background, so if your terminal has
 transparency enabled (Konsole, Kitty, Alacritty, GNOME Terminal all can),
 your wallpaper shows through.
+
+## Tests
+
+```sh
+pip install -r requirements-dev.txt
+pytest
+```
+
+They need neither mpv nor a Jellyfin server.
 
 ## Building the .deb yourself
 
@@ -251,7 +281,7 @@ The package ends up in `dist/`.
 
 ## Credits
 
-The look is borrowed from [jellyfin-tui](https://github.com/Epiklal/jellyfin-client-lite),
+The look is borrowed from [jellyfin-tui](https://github.com/dhonus/jellyfin-tui),
 which is the one to use if you want a full-featured client.
 
 ## License

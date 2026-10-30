@@ -4,7 +4,7 @@ rem Beim ersten Start richtet es die Python-Umgebung .venv ein.
 setlocal
 cd /d "%~dp0"
 if not exist .venv\Scripts\python.exe (
-    echo Erster Start: richte die Python-Umgebung ein, das dauert einen Moment ...
+    echo First start: setting up the Python environment, this takes a moment ...
     py -m venv .venv 2>nul || python -m venv .venv || goto fehler
 )
 .venv\Scripts\python.exe -c "import textual, requests" 2>nul || (
@@ -16,7 +16,7 @@ exit /b
 
 :fehler
 echo.
-echo Einrichtung fehlgeschlagen, siehe Meldung oben.
-echo Ist Python installiert? https://www.python.org/downloads/
+echo Setup failed, see the message above.
+echo Is Python installed? https://www.python.org/downloads/
 pause
 exit /b 1

@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 import requests
 
 from . import CACHE_DIR, NAME, __version__
+from .i18n import t
 
 # Pro Prozessstart eine eigene, zufällige Geräte-ID: verhindert, dass ein
 # zweiter (versehentlich parallel laufender) Start dem ersten die Jellyfin-
@@ -45,13 +46,35 @@ def _auth_header(token: Optional[str] = None) -> str:
 # Wiedergabe sofort, neu geladen wird nur, wenn sich etwas geändert hat.
 CACHE_PATH = CACHE_DIR / "library.json"
 # erhöhen, wenn sich die Felder von Track ändern - oder wie sie befüllt werden
-# (3: Interpret kam bei Titeln ohne "Artists" fälschlich als "Unbekannt")
-CACHE_VERSION = 3
+# (3: Interpret kam bei Titeln ohne "Artists" fälschlich als "Unbekannt",
+# 4: neues Feld track_no)
+CACHE_VERSION = 5
 
 # Steuerzeichen in Tags (z.B. ESC) gingen sonst ungefiltert ans Terminal: eine
 # präparierte Datei könnte Fenstertitel oder Zwischenablage (OSC 52)
 # manipulieren. Dazu Bidi-Steuerzeichen, die Text optisch umdrehen.
 _UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]+")
+
+
+def _item_cover_id(item: dict) -> str:
+    """Das eigene Bild des Titels geht vor: das Album-Bild passt nicht immer."""
+    if (item.get("ImageTags") or {}).get("Primary"):
+        return item["Id"]
+    if item.get("AlbumPrimaryImageTag"):
+        return item.get("AlbumId", "")
+    return ""
+
+
+def _drop_foreign_album_covers(tracks: List["Track"]) -> None:
+    """Lose abgelegte Titel teilen sich die AlbumId ihres Ordners, auch bei
+    verschiedenen Album-Namen (siehe album_tracks). Das Bild dieses Eintrags
+    gehört dann zu einem fremden Album - lieber gar kein Cover als ein falsches."""
+    names: dict = {}
+    for track in tracks:
+        names.setdefault(track.album_id, set()).add(track.album)
+    for track in tracks:
+        if track.cover_id == track.album_id and len(names[track.album_id]) > 1:
+            track.cover_id = ""
 
 
 @dataclass
@@ -61,7 +84,9 @@ class Track:
     artist: str
     album: str
     duration_ticks: int  # Jellyfin ticks (1 tick = 100ns)
-    album_id: str = ""  # für das Cover (hängt meist am Album, nicht am Titel)
+    album_id: str = ""
+    track_no: int = 0  # Position im Album: CD * 1000 + Titelnummer
+    cover_id: str = ""  # Eintrag mit dem passenden Bild, leer wenn es keins gibt
 
     def __post_init__(self) -> None:
         self.title = _UNSAFE_CHARS.sub(" ", self.title).strip()
@@ -98,7 +123,7 @@ class JellyfinClient:
             timeout=10,
         )
         if resp.status_code == 401:
-            raise RuntimeError("Anmeldung fehlgeschlagen: Benutzername oder Passwort falsch.")
+            raise RuntimeError(t("Anmeldung fehlgeschlagen: Benutzername oder Passwort falsch."))
         resp.raise_for_status()
         self._set_token(resp.json())
 
@@ -121,7 +146,7 @@ class JellyfinClient:
         if resp.status_code == 401:
             self._session.headers["Authorization"] = _auth_header()
             raise RuntimeError(
-                "Die gespeicherte Anmeldung ist abgelaufen oder wurde widerrufen."
+                t("Die gespeicherte Anmeldung ist abgelaufen oder wurde widerrufen.")
             )
         resp.raise_for_status()
         self.api_key = token
@@ -132,7 +157,7 @@ class JellyfinClient:
         """Startet Quick Connect: (Code zum Eingeben in Jellyfin, Geheimnis)."""
         resp = self._session.post(f"{self.server_url}/QuickConnect/Initiate", timeout=10)
         if resp.status_code in (400, 401, 403):
-            raise RuntimeError("Quick Connect ist auf diesem Server nicht aktiviert.")
+            raise RuntimeError(t("Quick Connect ist auf diesem Server nicht aktiviert."))
         resp.raise_for_status()
         data = resp.json()
         return data["Code"], data["Secret"]
@@ -158,7 +183,7 @@ class JellyfinClient:
 
     def resolve_user_id(self) -> str:
         if not self.user_id:
-            raise RuntimeError("Nicht angemeldet - login() wurde nicht aufgerufen.")
+            raise RuntimeError(t("Nicht angemeldet - login() wurde nicht aufgerufen."))
         return self.user_id
 
     def fetch_all_tracks(self) -> List[Track]:
@@ -180,10 +205,13 @@ class JellyfinClient:
                     "IncludeItemTypes": "Audio",
                     "Recursive": "true",
                     "Fields": "RunTimeTicks",
-                    # Bild-Infos und Wiedergabe-Status (UserData) werden nicht
+                    # Von den Bildern nur die Kennung des Hauptbilds (für
+                    # cover_id). Wiedergabe-Status (UserData) wird nicht
                     # gebraucht - spart dem Server Datenbankabfragen und
                     # verkleinert die Antwort (schnellerer Start über VPN).
-                    "EnableImages": "false",
+                    "EnableImages": "true",
+                    "EnableImageTypes": "Primary",
+                    "ImageTypeLimit": 1,
                     "EnableUserData": "false",
                     "StartIndex": start,
                     "Limit": page_size,
@@ -197,17 +225,21 @@ class JellyfinClient:
                 tracks.append(
                     Track(
                         id=item["Id"],
-                        title=item.get("Name", "Unbekannt"),
+                        title=item.get("Name", t("Unbekannt")),
                         artist=item.get("AlbumArtist")
-                        or (item.get("Artists") or ["Unbekannt"])[0],
+                        or (item.get("Artists") or [t("Unbekannt")])[0],
                         album=item.get("Album", ""),
                         duration_ticks=item.get("RunTimeTicks", 0) or 0,
                         album_id=item.get("AlbumId", ""),
+                        track_no=(item.get("ParentIndexNumber") or 0) * 1000
+                        + (item.get("IndexNumber") or 0),
+                        cover_id=_item_cover_id(item),
                     )
                 )
             start += page_size
             if start >= data.get("TotalRecordCount", 0) or not items:
                 break
+        _drop_foreign_album_covers(tracks)
         self._save_cache(tracks, fetched_at)
         return tracks
 
@@ -223,7 +255,7 @@ class JellyfinClient:
             ):
                 return None
             return [Track(*t) for t in data["tracks"]], data["fetched_at"]
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return None
 
     def _save_cache(self, tracks: List[Track], fetched_at: str) -> None:
@@ -328,4 +360,19 @@ def shuffled(tracks: List[Track]) -> List[Track]:
 
 
 def sorted_tracks(tracks: List[Track]) -> List[Track]:
-    return sorted(tracks, key=lambda t: (t.artist.casefold(), t.album.casefold(), t.title.casefold()))
+    return sorted(
+        tracks,
+        key=lambda t: (t.artist.casefold(), t.album.casefold(), t.track_no, t.title.casefold()),
+    )
+
+
+def album_tracks(tracks: List[Track], track: Track) -> List[Track]:
+    """Alle Titel aus dem Album von `track`, in Titelreihenfolge. Ohne Album-ID
+    zählen Albumname und Interpret - ein "Greatest Hits" gibt es oft mehrfach.
+    Die ID allein reicht nicht: liegt Musik lose in einem Ordner, gibt Jellyfin
+    allen Titeln darin dieselbe AlbumId, auch bei ganz verschiedenen Alben."""
+    if track.album_id:
+        hits = [t for t in tracks if t.album_id == track.album_id and t.album == track.album]
+    else:
+        hits = [t for t in tracks if t.album == track.album and t.artist == track.artist]
+    return sorted(hits, key=lambda t: (t.track_no, t.title.casefold()))

@@ -21,6 +21,7 @@ import uuid
 from typing import Any, Optional
 
 from . import STATE_DIR, ipc
+from .i18n import t
 
 
 def find_mpv(configured: Optional[str] = None) -> Optional[str]:
@@ -276,7 +277,7 @@ class MPVPlayer:
                 except OSError:
                     pass
             time.sleep(0.05)
-        raise RuntimeError(f"Keine Verbindung zu mpv, Details stehen in {self.LOG_PATH}")
+        raise RuntimeError(t("Keine Verbindung zu mpv, Details stehen in {path}", path=self.LOG_PATH))
 
     @property
     def alive(self) -> bool:

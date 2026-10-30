@@ -1,7 +1,8 @@
 {
   "server_url": "http://127.0.0.1:8096",
-  "username": "DEIN_JELLYFIN_BENUTZERNAME",
-  "password": "DEIN_JELLYFIN_PASSWORT",
+  "username": "YOUR_JELLYFIN_USERNAME",
+  "password": "YOUR_JELLYFIN_PASSWORD",
+  "language": "auto",
   "autoplay": true,
   "start_mode": "shuffle",
   "show_cover": true,
