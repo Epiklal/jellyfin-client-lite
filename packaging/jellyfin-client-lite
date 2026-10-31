@@ -1,6 +1,28 @@
 #!/bin/sh
-python3 /usr/lib/jellyfin-client-lite/run.py "$@"
-status=$?
+lib=/usr/lib/jellyfin-client-lite
+venv="${XDG_DATA_HOME:-$HOME/.local/share}/jellyfin-client-lite/venv"
+
+has_textual() {
+    "$1" -c 'from importlib.metadata import version; import sys; sys.exit(tuple(map(int, version("textual").split(".")[:2])) < (2, 1))' 2>/dev/null
+}
+
+# Ältere Systeme (z.B. Ubuntu 24.04, Linux Mint 22) liefern kein passendes
+# Textual mit, das kommt dann wie unter Windows in eine eigene venv
+python=python3
+status=0
+if ! has_textual python3; then
+    python="$venv/bin/python"
+    if ! has_textual "$python"; then
+        echo "First start: setting up the Python environment, this takes a moment ..."
+        python3 -m venv --clear --system-site-packages "$venv" &&
+            "$python" -m pip install --disable-pip-version-check -r "$lib/requirements.txt"
+        status=$?
+    fi
+fi
+if [ "$status" -eq 0 ]; then
+    "$python" "$lib/run.py" "$@"
+    status=$?
+fi
 if [ "$status" -ne 0 ]; then
     # Aus dem Startmenü gestartet würde sich das Fenster sonst sofort schließen
     echo

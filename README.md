@@ -44,7 +44,7 @@ For media keys also install `mpv-mpris` (and `playerctl` if you want to
 check that it works). I've tested it on Debian 12 and 13, Ubuntu 24.04 and
 26.04, Fedora 44 and Arch.
 
-**Debian 13+ or Ubuntu 26.04+:** grab the `.deb` from the
+**Debian, Ubuntu, Linux Mint:** grab the `.deb` from the
 [releases page](https://github.com/Epiklal/jellyfin-client-lite/releases)
 and run
 
@@ -55,8 +55,9 @@ sudo apt install ./jellyfin-client-lite_*_all.deb
 This pulls in mpv and the Python packages and adds "Jellyfin Client Lite"
 to your app menu. Run it from there or type `jellyfin-client-lite`.
 
-Older Debian/Ubuntu versions (like 24.04) ship a Textual that's too old for
-the `.deb`, so use the source install below.
+Older versions (like Ubuntu 24.04 or Mint 22) ship a Textual that's too old,
+so on those the first start downloads a current one from PyPI into
+`~/.local/share/jellyfin-client-lite/venv`, which needs internet once.
 
 **Anything else / from source:**
 

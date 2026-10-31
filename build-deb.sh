@@ -10,7 +10,7 @@ trap 'rm -rf "$root"' EXIT
 chmod 755 "$root"  # mktemp legt 700 an - landet sonst als Rechte für / im Paket
 
 install -Dm755 packaging/$name "$root/usr/bin/$name"
-install -Dm644 run.py config.example.json -t "$root/usr/lib/$name"
+install -Dm644 run.py config.example.json requirements.txt -t "$root/usr/lib/$name"
 install -Dm644 jfclite/*.py -t "$root/usr/lib/$name/jfclite"
 install -Dm644 packaging/$name.desktop -t "$root/usr/share/applications"
 install -Dm644 packaging/$name.svg -t "$root/usr/share/icons/hicolor/scalable/apps"
