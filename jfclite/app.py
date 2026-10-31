@@ -658,7 +658,8 @@ class JellyfinClientLite(App):
             self.presence.update(self.queue[self.current_index], pos, dur, paused)
 
     def _tick(self) -> None:
-        if self.player is None:
+        # Beim Abbau sind die Widgets schon weg, der Timer läuft aber noch kurz weiter
+        if self.player is None or not self.is_running:
             return
         if not self.player.alive:
             self._restart_player()

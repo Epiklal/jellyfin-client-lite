@@ -394,3 +394,22 @@ def test_failed_save_does_not_crash():
         assert not isinstance(app.screen, SettingsScreen)
 
     run_app(scenario, save_config=fail)
+
+
+def test_tick_updates_the_status_while_running():
+    presence = FakePresence()
+
+    async def scenario(app, pilot):
+        app.current_index = 0
+        app._tick()
+        assert presence.updates
+
+    run_app(scenario, presence=presence)
+
+
+def test_tick_during_shutdown_does_not_crash():
+    # Der Timer feuerte in der CI gelegentlich, als die Widgets schon abgebaut waren
+    async def scenario(app, pilot):
+        app.set_interval(0.0005, app._tick)
+
+    run_app(scenario)
