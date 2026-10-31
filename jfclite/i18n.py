@@ -54,6 +54,7 @@ EN = {
     "Autoplay (beim Start sofort abspielen)": "Autoplay (start playing right away)",
     "Cover neben dem Titel anzeigen": "Show cover next to the title",
     "Songtext anzeigen": "Show lyrics",
+    "Aktuellen Titel in Discord teilen": "Share current track on Discord",
     "Beim Start: Reihenfolge": "Order at startup",
     "Sprache": "Language",
     "Speichern": "Save",

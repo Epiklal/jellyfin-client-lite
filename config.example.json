@@ -8,5 +8,6 @@
   "show_cover": true,
   "show_lyrics": true,
   "discord_client_id": "",
+  "discord_presence": true,
   "public_url": ""
 }

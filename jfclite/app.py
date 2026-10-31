@@ -200,14 +200,13 @@ SettingsScreen {{
     width: 66;
     height: auto;
     border: round {ACCENT};
-    padding: 1 2;
+    padding: 0 2;
     background: $surface;
 }}
 
 #settings-title {{
     color: {ACCENT};
     text-style: bold;
-    margin-bottom: 1;
 }}
 
 #settings Horizontal {{
@@ -258,6 +257,11 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
             with Horizontal():
                 yield Label(t("Songtext anzeigen"))
                 yield Switch(self._settings["show_lyrics"], id="set-lyrics")
+            # Ohne Application-ID wird ohnehin nichts an Discord gesendet
+            if "discord_presence" in self._settings:
+                with Horizontal():
+                    yield Label(t("Aktuellen Titel in Discord teilen"))
+                    yield Switch(self._settings["discord_presence"], id="set-discord")
             with Horizontal():
                 yield Label(t("Beim Start: Reihenfolge"))
                 yield Select(
@@ -280,15 +284,16 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
-            self.dismiss(
-                {
-                    "autoplay": self.query_one("#set-autoplay", Switch).value,
-                    "show_cover": self.query_one("#set-cover", Switch).value,
-                    "show_lyrics": self.query_one("#set-lyrics", Switch).value,
-                    "start_mode": self.query_one("#set-start-mode", Select).value,
-                    "language": self.query_one("#set-language", Select).value,
-                }
-            )
+            result = {
+                "autoplay": self.query_one("#set-autoplay", Switch).value,
+                "show_cover": self.query_one("#set-cover", Switch).value,
+                "show_lyrics": self.query_one("#set-lyrics", Switch).value,
+                "start_mode": self.query_one("#set-start-mode", Select).value,
+                "language": self.query_one("#set-language", Select).value,
+            }
+            if "discord_presence" in self._settings:
+                result["discord_presence"] = self.query_one("#set-discord", Switch).value
+            self.dismiss(result)
         else:
             self.dismiss(None)
 
@@ -649,7 +654,7 @@ class JellyfinClientLite(App):
         self.main.query_one(SeekBar).set_progress(pos, dur)
         self.main.query_one("#btn-play", Control).set_label("▶" if paused else "⏸")
         self.main.query_one(VolumeBar).set_volume(self.player.volume)
-        if self.presence and self.current_index >= 0:
+        if self.presence and self.config.get("discord_presence", True) and self.current_index >= 0:
             self.presence.update(self.queue[self.current_index], pos, dur, paused)
 
     def _tick(self) -> None:
@@ -979,11 +984,16 @@ class JellyfinClientLite(App):
             "start_mode": self.config.get("start_mode", "shuffle"),
             "language": self.config.get("language") if self.config.get("language") in ("de", "en") else "auto",
         }
+        if self.presence:
+            current["discord_presence"] = self.config.get("discord_presence", True)
 
         def done(result: Optional[dict]) -> None:
             if result is None:
                 return
             self.config.update(result)
+            # Vor dem Speichern: die Anzeige verschwindet auch, wenn das fehlschlägt
+            if self.presence and not self.config.get("discord_presence", True):
+                self.presence.clear()
             try:
                 if self._save_config:
                     self._save_config()

@@ -237,6 +237,12 @@ costs basically nothing.
 3. In Discord, turn on *Activity Privacy → Share your detected activities
    with others*.
 
+To stop sharing, turn off *Share current track on Discord* in the settings
+(`s`, the switch only shows up once an Application ID is set). The track
+disappears from your profile right away, and the setting is remembered as
+`"discord_presence": false`. Your ID stays in the config for when you want it
+back.
+
 **Album covers** only work if your Jellyfin is reachable from the internet,
 because Discord fetches the image itself:
 

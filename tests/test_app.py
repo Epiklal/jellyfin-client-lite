@@ -51,6 +51,21 @@ class FakePlayer:
         return lambda *args, **kwargs: None
 
 
+class FakePresence:
+    def __init__(self):
+        self.updates = []
+        self.cleared = 0
+
+    def update(self, track, pos, dur, paused):
+        self.updates.append(track.id)
+
+    def clear(self):
+        self.cleared += 1
+
+    def close(self):
+        pass
+
+
 class FakeClient:
     def __init__(self, tracks):
         self.tracks = tracks
@@ -84,12 +99,12 @@ def fake_player(monkeypatch):
     monkeypatch.setattr(app_module, "MPVPlayer", FakePlayer)
 
 
-def run_app(scenario, tracks=TRACKS, config=None, save_config=None, size=(80, 24)):
+def run_app(scenario, tracks=TRACKS, config=None, save_config=None, size=(80, 24), presence=None):
     """Startet die App headless, wartet auf die Bibliothek und führt `scenario` aus."""
 
     async def main():
         settings = {"autoplay": False, "start_mode": "sorted", **(config or {})}
-        app = JellyfinClientLite(FakeClient(tracks), None, settings, save_config)
+        app = JellyfinClientLite(FakeClient(tracks), presence, settings, save_config)
         async with app.run_test(size=size) as pilot:
             for _ in range(200):
                 if app.all_tracks:
@@ -224,7 +239,8 @@ def test_search_filters_and_escape_ends_it():
 
 
 @pytest.mark.parametrize("size", [(80, 24), (120, 40)])
-def test_settings_dialog_fits_the_terminal(size):
+@pytest.mark.parametrize("presence", [None, FakePresence()])
+def test_settings_dialog_fits_the_terminal(size, presence):
     async def scenario(app, pilot):
         await pilot.press("s")
         await pilot.pause()
@@ -236,11 +252,12 @@ def test_settings_dialog_fits_the_terminal(size):
             assert region.y >= 0 and region.bottom <= size[1], widget.id
             assert region.x >= 0 and region.right <= size[0], widget.id
 
-    run_app(scenario, size=size)
+    run_app(scenario, size=size, presence=presence)
 
 
 @pytest.mark.parametrize("label", ["Sortiert (Interpret, Album)", "Sorted (artist, album)"])
-def test_settings_dialog_needs_no_scrolling_at_80x24(monkeypatch, label):
+@pytest.mark.parametrize("presence", [None, FakePresence()])
+def test_settings_dialog_needs_no_scrolling_at_80x24(monkeypatch, label, presence):
     # Ein umbrochener Eintrag in der Auswahl schob früher den unteren Rand aus dem Bild
     monkeypatch.setattr(app_module, "START_MODES", [(label, "sorted"), ("Shuffle", "shuffle")])
 
@@ -252,7 +269,7 @@ def test_settings_dialog_needs_no_scrolling_at_80x24(monkeypatch, label):
         assert screen.max_scroll_x == 0
         assert screen.query_one("#settings").region.bottom <= 24
 
-    run_app(scenario)
+    run_app(scenario, presence=presence)
 
 
 def test_settings_save_updates_and_stores_the_config():
@@ -288,6 +305,81 @@ def test_settings_cancel_changes_nothing():
         assert saved == []
 
     run_app(scenario, save_config=lambda: saved.append(True))
+
+
+def test_discord_switch_needs_an_application_id():
+    async def scenario(app, pilot):
+        await pilot.press("s")
+        await pilot.pause()
+        assert not app.screen.query("#set-discord")
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert "discord_presence" not in app.config
+
+    run_app(scenario)
+
+
+def test_turning_discord_off_and_on_again():
+    presence = FakePresence()
+    saved = []
+
+    async def set_sharing(app, pilot, value):
+        await pilot.press("s")
+        await pilot.pause()
+        app.screen.query_one("#set-discord", Switch).value = value
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+
+    async def scenario(app, pilot):
+        app.current_index = 0
+        app._refresh_status()
+        assert presence.updates and presence.cleared == 0
+
+        await set_sharing(app, pilot, False)
+        assert app.config["discord_presence"] is False
+        assert saved == [True]
+        assert presence.cleared == 1
+        presence.updates.clear()
+        app._refresh_status()
+        assert presence.updates == []
+
+        await set_sharing(app, pilot, True)
+        assert presence.cleared == 1
+        app._refresh_status()
+        assert presence.updates
+
+    run_app(scenario, save_config=lambda: saved.append(True), presence=presence)
+
+
+def test_discord_stays_silent_if_turned_off_in_the_config():
+    presence = FakePresence()
+
+    async def scenario(app, pilot):
+        app.current_index = 0
+        app._refresh_status()
+        assert presence.updates == []
+        await pilot.press("s")
+        await pilot.pause()
+        assert app.screen.query_one("#set-discord", Switch).value is False
+
+    run_app(scenario, config={"discord_presence": False}, presence=presence)
+
+
+def test_turning_discord_off_works_even_if_saving_fails():
+    presence = FakePresence()
+
+    def fail():
+        raise OSError("read-only")
+
+    async def scenario(app, pilot):
+        await pilot.press("s")
+        await pilot.pause()
+        app.screen.query_one("#set-discord", Switch).value = False
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert presence.cleared == 1
+
+    run_app(scenario, save_config=fail, presence=presence)
 
 
 def test_failed_save_does_not_crash():

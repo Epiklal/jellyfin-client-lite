@@ -231,4 +231,4 @@ def test_password_login_stores_the_token_not_the_password(monkeypatch):
 def test_example_config_is_valid_and_complete():
     example = json.loads(run.EXAMPLE_PATH.read_text(encoding="utf-8"))
     assert run.missing_settings(example) == []
-    assert {"language", "autoplay", "start_mode", "show_cover", "show_lyrics"} <= example.keys()
+    assert {"language", "autoplay", "start_mode", "show_cover", "show_lyrics", "discord_presence"} <= example.keys()

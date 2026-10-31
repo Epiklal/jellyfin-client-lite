@@ -26,6 +26,17 @@ def test_cover_address_uses_the_cover_id(presence, monkeypatch):
     assert assets["large_text"] == "Eins"
 
 
+def test_same_track_is_sent_again_after_clear(presence, monkeypatch):
+    # Einschalten nach dem Ausschalten: sonst gälte das Update als "keine Änderung"
+    sent = []
+    monkeypatch.setattr(presence, "_set", sent.append)
+    track = Track("1", "Song", "Artist", "Eins", 0, "ordner", 0, "")
+    presence.update(track, 0.0, 180.0, False)
+    presence.clear()
+    presence.update(track, 0.0, 180.0, False)
+    assert [bool(activity) for activity in sent] == [True, False, True]
+
+
 def test_track_without_cover_sends_no_image(presence, monkeypatch):
     track = Track("1", "Song", "Artist", "Eins", 0, "ordner", 0, "")
     assert "assets" not in activity_for(presence, monkeypatch, track)
