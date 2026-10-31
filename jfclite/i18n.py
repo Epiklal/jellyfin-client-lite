@@ -119,6 +119,10 @@ EN = {
         "  Check the address and port (Jellyfin usually uses :8096).\n"
     ),
     "  Verbunden mit „{name}“ (Jellyfin {version})\n": "  Connected to \"{name}\" (Jellyfin {version})\n",
+    "  Achtung: http:// ist unverschlüsselt, Passwort und Token wären mitlesbar.": (
+        "  Careful: http:// isn't encrypted, your password and token could be read along the way."
+    ),
+    "  Über das Internet besser https:// verwenden.\n": "  Over the internet, better use https://.\n",
     "Benutzername": "Username",
     "Passwort (bleibt beim Tippen unsichtbar): ": "Password (stays invisible while typing): ",
     "  Anmeldung nicht möglich: {error}\n": "  Couldn't log in: {error}\n",
@@ -150,8 +154,8 @@ EN = {
         "  1  Quick Connect (recommended: confirm a code in a Jellyfin that's already\n"
         "     logged in, no password gets stored)"
     ),
-    "  2  Benutzername und Passwort (das Passwort liegt dann im Klartext in der Config)": (
-        "  2  Username and password (the password then sits in the config in plain text)"
+    "  2  Benutzername und Passwort (gespeichert wird auch hier nur ein Token)": (
+        "  2  Username and password (here too, only a token gets stored)"
     ),
     "Auswahl": "Choice",
     "Angemeldet.\n": "Logged in.\n",

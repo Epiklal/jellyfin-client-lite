@@ -139,7 +139,16 @@ LEAN_OPTIONS = [
     "--load-commands=no",
     "--demuxer-max-bytes=8MiB",
     "--demuxer-max-back-bytes=4MiB",
+    # Öffnet den nächsten Titel schon vor dem Ende des aktuellen - kürzt die
+    # Lücke beim Übergang, die sonst der Verbindungsaufbau kostet
+    "--prefetch-playlist=yes",
 ]
+
+
+def replaygain_args(mode: object) -> list[str]:
+    """mpv-Option zur Config-Einstellung "replaygain" ("track" oder "album").
+    Alles andere heißt aus. Die Werte stehen in den Tags der Datei."""
+    return [f"--replaygain={mode}"] if mode in ("track", "album") else []
 
 
 def _known_options(mpv: str) -> set[str]:

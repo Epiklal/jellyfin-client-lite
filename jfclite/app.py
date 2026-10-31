@@ -27,7 +27,7 @@ from . import NAME
 from .client import JellyfinClient, Track, album_tracks, shuffled, sorted_tracks
 from .discord import DiscordPresence
 from .i18n import t
-from .player import MPVPlayer
+from .player import MPVPlayer, replaygain_args
 from .widgets import (
     Control,
     CoverArt,
@@ -475,7 +475,7 @@ class JellyfinClientLite(App):
     def _start_player(self) -> bool:
         """Startet mpv. Klappt das nicht, steht der Grund in der Anzeige."""
         try:
-            self.player = MPVPlayer()
+            self.player = MPVPlayer(replaygain_args(self.config.get("replaygain")))
         except Exception as exc:
             self.main.query_one("#np-title", Static).update(t("⚠ mpv ließ sich nicht starten"))
             self.main.query_one("#np-sub", Static).update(

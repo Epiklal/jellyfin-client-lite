@@ -7,11 +7,13 @@ Zusatzpakete funktioniert - auch unter Windows.
 from __future__ import annotations
 
 import getpass
+import ipaddress
 import json
 import os
 import time
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 import requests
 
@@ -19,6 +21,7 @@ from .client import JellyfinClient
 from .i18n import t
 
 QUICK_CONNECT_TIMEOUT = 300  # Sekunden, so lange gilt ein Code auf dem Server
+INTERNAL_DOMAINS = (".local", ".lan", ".home", ".internal", ".home.arpa", ".fritz.box", ".ts.net")
 
 
 def save_config(path: Path, config: dict) -> None:
@@ -45,6 +48,21 @@ def _normalize_url(url: str) -> str:
     return url
 
 
+def _is_exposed_http(url: str) -> bool:
+    """Unverschlüsselt und nach außen? Interne Adressen (privates Netz, Tailscale,
+    Namen ohne Domain) zählen nicht - das lässt sich nur schätzen, ein Hinweis
+    zu viel schadet aber nicht."""
+    parts = urlsplit(url)
+    if parts.scheme != "http":
+        return False
+    host = (parts.hostname or "").lower()
+    try:
+        return ipaddress.ip_address(host).is_global
+    except ValueError:
+        pass
+    return "." in host and not host.endswith(INTERNAL_DOMAINS)
+
+
 def _ask_server(default: str) -> JellyfinClient:
     while True:
         url = _normalize_url(_ask(t("Serveradresse (z.B. 192.168.1.10:8096)"), default))
@@ -64,6 +82,9 @@ def _ask_server(default: str) -> JellyfinClient:
                 version=info.get("Version", "?"),
             )
         )
+        if _is_exposed_http(url):
+            print(t("  Achtung: http:// ist unverschlüsselt, Passwort und Token wären mitlesbar."))
+            print(t("  Über das Internet besser https:// verwenden.\n"))
         return client
 
 
@@ -78,8 +99,11 @@ def _password_login(client: JellyfinClient, config: dict) -> bool:
     except requests.RequestException as exc:
         print(t("  Anmeldung nicht möglich: {error}\n", error=exc))
         return False
-    config.update(username=username, password=password)
-    config.pop("access_token", None)
+    # Nur der Token kommt in die Config, nicht das Passwort. Der Benutzername
+    # bleibt als Vorschlag für die nächste Einrichtung.
+    client.keep_token = True
+    config.update(username=username, access_token=client.api_key)
+    config.pop("password", None)
     return True
 
 
@@ -151,7 +175,7 @@ def run_setup(existing: Optional[dict] = None) -> dict:
                 "     es wird kein Passwort gespeichert)"
             )
         )
-        print(t("  2  Benutzername und Passwort (das Passwort liegt dann im Klartext in der Config)"))
+        print(t("  2  Benutzername und Passwort (gespeichert wird auch hier nur ein Token)"))
         choice = _ask(t("Auswahl"), "1")
         if choice == "1":
             ok = _quick_connect_login(client, config)
@@ -161,9 +185,6 @@ def run_setup(existing: Optional[dict] = None) -> dict:
             continue
         if ok:
             break
-    # Jellyfin-Sitzung von der Prüfung wieder schließen; beim Start meldet sich
-    # run.py selbst an (bei Quick Connect bleibt der Token gültig)
-    client.logout()
     print(t("Angemeldet.\n"))
     _ask_discord(config)
     print(t("Fertig. Die Einstellungen (Autoplay usw.) öffnest du im Player mit [s].\n"))

@@ -113,8 +113,11 @@ that it's reachable and shows the server's name) and then for a login:
    that's already logged in (user menu → Quick Connect). No password is stored,
    only an access token that you can revoke on the server. Quick Connect has to
    be enabled on the server (it's a setting in the admin dashboard).
-2. **Username and password:** the fallback. The password ends up in plain text
-   in `config.json`, readable only by your user on Linux/macOS.
+2. **Username and password:** the fallback. The password is only used to log
+   in and isn't stored, `config.json` gets an access token here too.
+
+If the address is plain `http://` and looks like it's on the internet, setup
+warns you.
 
 To do this again later, run `python run.py --setup` (`.deb`:
 `jellyfin-client-lite --setup`, Windows: `jellyfin-client-lite.cmd --setup`).
@@ -165,7 +168,13 @@ Press `s` in the player, or edit the config:
   (`pip install pillow`, the `.deb` recommends `python3-pil`) and a terminal
   with true color.
 - `start_mode`: `"shuffle"` or `"sorted"` (by artist, album, track number) for
-  the order the list has at startup. `r` always reshuffles.
+  the order the list has at startup. `r` always reshuffles. Shuffling spreads
+  each artist across the whole list, so they don't come up several times in a
+  row just by chance.
+- `replaygain`: not in the settings dialog, add it to the config by hand if you
+  want it. `"track"` or `"album"` evens out the volume using the ReplayGain tags
+  in your files (files without tags play as they are). Off by default. Applies
+  from the next start.
 
 Picking a search result plays through the results, and the same goes for an
 album opened with `a`. `Esc` brings back the whole library, continuing with the
@@ -240,10 +249,11 @@ address. Problems end up in `~/.local/state/jellyfin-client-lite/discord.log`.
 
 ## Security notes
 
-- With Quick Connect, `config.json` only holds an access token, which you can
-  revoke on the server. With a password login, the password is stored there in
-  plain text and nowhere else. Either way, the file is written readable only by
-  your user. The access token never shows up in a URL: mpv gets it as an HTTP
+- After setup, `config.json` only holds an access token, which you can revoke on
+  the server. Your password is only there if you wrote it in by hand (see above)
+  or set up with an older version, in that case run `--setup` once to replace
+  it. Setup writes the file readable only by your user. The access token never
+  shows up in a URL: mpv gets it as an HTTP
   header, so it doesn't leak through MPRIS (media widgets, KDE Connect, ...)
   and it's never sent to Discord.
 - Control characters in track tags get stripped, so a file with weird tags

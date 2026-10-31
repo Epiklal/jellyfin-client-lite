@@ -2,6 +2,7 @@
 die requests-Session des Clients."""
 
 import json
+import random
 
 import pytest
 import requests
@@ -12,6 +13,7 @@ from jfclite.client import (
     Track,
     _auth_header,
     album_tracks,
+    shuffled,
     sorted_tracks,
 )
 
@@ -457,3 +459,75 @@ def test_sorted_tracks_order():
     a2 = track(id="a2", artist="Alpha", album="x", title="A", track_no=2)
     a1 = track(id="a1", artist="alpha", album="x", title="Z", track_no=1)
     assert sorted_tracks([b, a2, a1]) == [a1, a2, b]
+
+
+# --- shuffled ---------------------------------------------------------------
+
+
+def test_shuffled_keeps_every_track_and_the_input():
+    tracks = [track(str(i), artist=f"a{i % 3}") for i in range(30)]
+    before = list(tracks)
+    result = shuffled(tracks)
+    assert tracks == before
+    assert sorted(t.id for t in result) == sorted(t.id for t in tracks)
+
+
+def test_shuffled_handles_empty_and_single():
+    assert shuffled([]) == []
+    only = track("1")
+    assert shuffled([only]) == [only]
+
+
+def longest_run(tracks, artist):
+    run = longest = 0
+    for item in tracks:
+        run = run + 1 if item.artist.casefold() == artist else 0
+        longest = max(longest, run)
+    return longest
+
+
+def test_shuffled_avoids_repeats_with_a_big_artist():
+    # Reiner Zufall legt hier regelmäßig 5 und mehr Titel in Folge hin
+    random.seed(1)
+    tracks = [track(f"a{i}", artist="a") for i in range(50)]
+    tracks += [track(f"o{i}", artist=f"other{i}") for i in range(50)]
+    for _ in range(50):
+        assert longest_run(shuffled(tracks), "a") <= 2
+
+
+def test_shuffled_never_repeats_when_artists_are_even():
+    random.seed(1)
+    tracks = [track(f"{a}{i}", artist=f"artist{a}") for a in range(5) for i in range(20)]
+    for _ in range(50):
+        result = shuffled(tracks)
+        repeats = sum(x.artist == y.artist for x, y in zip(result, result[1:]))
+        assert repeats <= 1  # höchstens ganz am Ende nicht vermeidbar
+
+
+def test_shuffled_spaces_an_artist_across_the_list():
+    # Nicht alle Titel eines Interpreten in einem Teil der Liste
+    random.seed(1)
+    tracks = [track(f"{a}{i}", artist=f"artist{a}") for a in range(10) for i in range(10)]
+    for _ in range(50):
+        result = shuffled(tracks)
+        for half in (result[:50], result[50:]):
+            for a in range(10):
+                assert sum(x.artist == f"artist{a}" for x in half) >= 3
+
+
+def test_shuffled_treats_case_as_the_same_artist():
+    random.seed(1)
+    tracks = [track(f"a{i}", artist="ABBA" if i % 2 else "abba") for i in range(10)]
+    tracks += [track(f"o{i}", artist=f"other{i}") for i in range(10)]
+    for _ in range(50):
+        assert longest_run(shuffled(tracks), "abba") <= 2
+
+
+def test_shuffled_with_only_one_artist_keeps_everything():
+    tracks = [track(str(i)) for i in range(20)]
+    assert sorted(t.id for t in shuffled(tracks)) == sorted(t.id for t in tracks)
+
+
+def test_shuffled_order_differs_between_runs():
+    tracks = [track(str(i), artist=f"a{i % 4}") for i in range(40)]
+    assert len({tuple(t.id for t in shuffled(tracks)) for _ in range(5)}) > 1

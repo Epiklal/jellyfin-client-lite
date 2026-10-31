@@ -8,7 +8,7 @@ import sys
 import pytest
 
 import run
-from jfclite.setup import _normalize_url, _password_login, save_config
+from jfclite.setup import _is_exposed_http, _normalize_url, _password_login, save_config
 
 
 @pytest.fixture
@@ -181,17 +181,48 @@ def test_normalize_url(url, expected):
     assert _normalize_url(url) == expected
 
 
-def test_password_login_drops_an_old_token(monkeypatch):
+@pytest.mark.parametrize(
+    "url, exposed",
+    [
+        ("http://jelly.example.com:8096", True),
+        ("http://8.8.8.8:8096", True),
+        ("http://[2001:4860:4860::8888]:8096", True),
+        ("https://jelly.example.com", False),
+        ("http://192.168.1.10:8096", False),
+        ("http://10.0.0.2", False),
+        ("http://100.64.0.1:8096", False),  # Tailscale
+        ("http://127.0.0.1:8096", False),
+        ("http://[::1]:8096", False),
+        ("http://localhost:8096", False),
+        ("http://jellyfin:8096", False),
+        ("http://nas.local:8096", False),
+        ("http://nas.lan", False),
+        ("http://fritz.nas.fritz.box:8096", False),
+        ("http://nas.tail1234.ts.net:8096", False),
+    ],
+)
+def test_is_exposed_http(url, exposed):
+    assert _is_exposed_http(url) is exposed
+
+
+def test_password_login_stores_the_token_not_the_password(monkeypatch):
     class Client:
+        keep_token = False
+
         def login(self, username, password):
             self.credentials = (username, password)
+            self.api_key = "new"
 
     answers = iter(["me"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     monkeypatch.setattr("getpass.getpass", lambda _="": "pw")
-    config = {"access_token": "old"}
-    _password_login(Client(), config)
-    assert config == {"username": "me", "password": "pw"}
+    client = Client()
+    config = {"access_token": "old", "password": "older"}
+    assert _password_login(client, config)
+    assert client.credentials == ("me", "pw")
+    assert config == {"username": "me", "access_token": "new"}
+    assert client.keep_token  # sonst wäre der gespeicherte Token beim Beenden ungültig
+    assert run.missing_settings({"server_url": "u", **config}) == []
 
 
 # --- Beispiel-Config --------------------------------------------------------

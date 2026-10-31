@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import astuple, dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -353,10 +353,46 @@ class JellyfinClient:
         self.api_key = None
 
 
+def _separate_artists(tracks: List[Track]) -> None:
+    """Tauscht Titel, die auf denselben Interpreten folgen, gegen den nächsten
+    späteren Titel eines anderen."""
+    for i in range(1, len(tracks)):
+        artist = tracks[i - 1].artist.casefold()
+        if tracks[i].artist.casefold() != artist:
+            continue
+        for j in range(i + 1, len(tracks)):
+            if tracks[j].artist.casefold() != artist:
+                tracks[i], tracks[j] = tracks[j], tracks[i]
+                break
+        else:
+            return  # ab hier nur noch dieser Interpret
+
+
 def shuffled(tracks: List[Track]) -> List[Track]:
-    copy = list(tracks)
-    random.shuffle(copy)
-    return copy
+    """Zufällige Reihenfolge, in der sich die Titel eines Interpreten über die
+    ganze Liste verteilen, statt wie bei reinem Zufall oft nah beieinander zu
+    landen: Jeder Interpret bekommt gleichmäßige Abstände (mit etwas Streuung)
+    ab einem zufälligen Startpunkt. Zwei Titel desselben Interpreten folgen nur
+    aufeinander, wenn am Ende nichts anderes mehr übrig ist."""
+    by_artist: Dict[str, List[Track]] = {}
+    for track in tracks:
+        by_artist.setdefault(track.artist.casefold(), []).append(track)
+    placed = []
+    for group in by_artist.values():
+        random.shuffle(group)
+        start = random.random()
+        placed += [
+            ((start + i + random.uniform(-0.2, 0.2)) / len(group), track)
+            for i, track in enumerate(group)
+        ]
+    placed.sort(key=lambda item: item[0])
+    # Der erste Durchlauf schiebt Wiederholungen ans Ende, der zweite (rückwärts)
+    # verteilt sie von dort wieder nach vorn.
+    result = [track for _, track in placed]
+    _separate_artists(result)
+    result.reverse()
+    _separate_artists(result)
+    return result
 
 
 def sorted_tracks(tracks: List[Track]) -> List[Track]:
