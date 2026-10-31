@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 NAME = "jellyfin-client-lite"
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 
 def _xdg(var: str, default: str) -> Path:
