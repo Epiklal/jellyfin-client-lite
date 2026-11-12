@@ -1,0 +1,28 @@
+Package: jellyfin-client-lite
+Architecture: all
+Version: 0.3.3
+Priority: optional
+Section: sound
+Maintainer: ketchupboy
+Depends: python3 (>= 3.10), python3-textual (>= 2.1) | python3-venv, python3-requests, mpv
+Recommends: mpv-mpris, playerctl, python3-pil
+Conflicts: jellyfin-tui-lite
+Replaces: jellyfin-tui-lite
+Filename: pool/main/jellyfin-client-lite_0.3.3_all.deb
+Size: 45924
+MD5sum: 190c41be48683311651ee849c9299637
+SHA1: eca228fcc7e249432ca0688ce6eba063dc2b1d27
+SHA256: a1b574e155c8fbb4e5ae982d7103b82ac358841f98b34632682b632b571a50f1
+SHA512: a9809118d6f5eceba0d9717a42c1a7f2c550776f65c146541b919cad0817843517c0f36954a64b4c23f3012baa485a47c6e786162f953877e2baae2f40f6c358
+Homepage: https://github.com/Epiklal/jellyfin-client-lite
+Description: tiny terminal music player for Jellyfin
+ Shuffles your whole Jellyfin music library in the terminal. Playback is
+ done by mpv without transcoding, so it stays light on CPU and RAM.
+ .
+ With mpv-mpris installed, media keys and the desktop's media widget work.
+ Reports playback to the server (play counts, statistics) and can
+ optionally show what you are listening to in Discord.
+ .
+ Installs its own APT source, so updates arrive with the normal system
+ updates.
+

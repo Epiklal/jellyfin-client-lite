@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jellyfin Client Lite</title>
+<meta name="description" content="Tiny terminal music player that shuffles your whole Jellyfin library.">
+<style>
+  :root { --bg: #111318; --panel: #1a1d24; --text: #e8e8ea; --muted: #a0a3ab; --accent: #e63946; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { color: var(--accent); margin: 0 0 4px; font-size: 2rem; }
+  h2 { margin: 36px 0 8px; font-size: 1.2rem; }
+  p { margin: 8px 0; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  .button { display: inline-block; margin: 16px 0 4px; padding: 12px 22px; border-radius: 8px;
+            background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; }
+  pre { background: var(--panel); border: 1px solid #2a2e37; border-radius: 8px; padding: 12px 14px;
+        overflow-x: auto; font-size: 0.9rem; }
+  img { width: 100%; height: auto; border-radius: 8px; border: 1px solid #2a2e37; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Jellyfin Client Lite</h1>
+  <p class="muted">A tiny terminal music player that shuffles your whole Jellyfin library.</p>
+
+  <a class="button" href="jellyfin-client-lite.deb">Download for Debian / Ubuntu / Linux Mint</a>
+  <p class="muted">Open the file and your software center (Discover, GNOME Software, …) installs it.
+    After that, updates arrive together with your normal system updates.</p>
+
+  <h2>Or in a terminal</h2>
+<pre>wget -O /tmp/jellyfin-client-lite.deb https://epiklal.github.io/jellyfin-client-lite/jellyfin-client-lite.deb
+sudo apt install /tmp/jellyfin-client-lite.deb</pre>
+  <p>Then start <b>Jellyfin Client Lite</b> from your app menu. The first start asks for your
+    server and logs you in with Quick Connect.</p>
+
+  <h2>Other systems</h2>
+  <p>Fedora, Arch, Windows and macOS: see the
+    <a href="https://github.com/Epiklal/jellyfin-client-lite#install">install guide on GitHub</a>.</p>
+
+  <img src="screenshot.png" alt="Jellyfin Client Lite playing a shuffled library, with queue and lyrics">
+
+  <p class="muted" style="margin-top:32px">
+    <a href="https://github.com/Epiklal/jellyfin-client-lite">Source code</a> ·
+    Apache-2.0 · <a href="key.asc">Signing key</a> for the APT source
+  </p>
+</main>
+</body>
+</html>

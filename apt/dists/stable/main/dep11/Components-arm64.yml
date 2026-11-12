@@ -1,0 +1,79 @@
+---
+File: DEP-11
+Version: '1.0'
+Origin: jellyfin-client-lite
+MediaBaseUrl: https://epiklal.github.io/jellyfin-client-lite
+---
+Type: desktop-application
+ID: io.github.epiklal.jellyfin_client_lite
+Package: jellyfin-client-lite
+ProjectLicense: Apache-2.0
+Name:
+  C: "Jellyfin Client Lite"
+Summary:
+  C: "Tiny terminal music player for your Jellyfin library"
+  de: "Kleiner Terminal-Musikplayer für deine Jellyfin-Bibliothek"
+Description:
+  C: "<p>Start it and it shuffles your whole Jellyfin music library in the terminal. Playback is done by mpv and the files are streamed as they are, without transcoding, so it stays light on your PC and your server.</p><ul><li>Media keys and the desktop media widget work (with mpv-mpris)</li><li>Search, album view, cover art and lyrics from your server</li><li>Tells your server what is playing, so play counts and statistics stay up to date</li><li>Optionally shows what you are listening to in Discord</li></ul>"
+  de: "<p>Starten, und es spielt deine ganze Jellyfin-Musikbibliothek zufällig im Terminal ab. Die Wiedergabe übernimmt mpv, die Dateien kommen unverändert ohne Umwandeln, das schont PC und Server.</p><ul><li>Medientasten und das Medien-Widget des Desktops funktionieren (mit mpv-mpris)</li><li>Suche, Album-Ansicht, Cover und Songtexte vom Server</li><li>Meldet dem Server, was läuft – Wiedergabezahlen und Statistik bleiben aktuell</li><li>Zeigt auf Wunsch in Discord an, was du hörst</li></ul>"
+Developer:
+  id: io.github.epiklal
+  name:
+    C: "ketchupboy"
+Categories:
+- AudioVideo
+- Audio
+- Player
+Keywords:
+  C:
+  - "jellyfin"
+  - "music"
+  - "player"
+  - "terminal"
+  - "shuffle"
+  de:
+  - "Musik"
+Url:
+  homepage: https://github.com/Epiklal/jellyfin-client-lite
+  bugtracker: https://github.com/Epiklal/jellyfin-client-lite/issues
+  vcs-browser: https://github.com/Epiklal/jellyfin-client-lite
+Launchable:
+  desktop-id:
+  - jellyfin-client-lite.desktop
+Provides:
+  binaries:
+  - jellyfin-client-lite
+Icon:
+  stock: jellyfin-client-lite
+  cached:
+  - name: jellyfin-client-lite_jellyfin-client-lite.png
+    width: 48
+    height: 48
+  - name: jellyfin-client-lite_jellyfin-client-lite.png
+    width: 64
+    height: 64
+  - name: jellyfin-client-lite_jellyfin-client-lite.png
+    width: 128
+    height: 128
+Screenshots:
+- default: true
+  caption:
+    C: "Shuffling a library, with the queue and lyrics on the side"
+  source-image:
+    url: https://epiklal.github.io/jellyfin-client-lite/screenshot.png
+Releases:
+- version: "0.3.3"
+  type: stable
+  unix-timestamp: 1794441600
+- version: "0.3.2"
+  type: stable
+  unix-timestamp: 1793404800
+- version: "0.3.1"
+  type: stable
+  unix-timestamp: 1793404800
+- version: "0.3.0"
+  type: stable
+  unix-timestamp: 1793318400
+- version: "0.2.0"
+  type: stable
+  unix-timestamp: 1790726400
