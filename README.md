@@ -47,16 +47,22 @@ For media keys also install `mpv-mpris` (and `playerctl` if you want to
 check that it works). I've tested it on Debian 12 and 13, Ubuntu 24.04 and
 26.04, Fedora 44 and Arch.
 
-**Debian, Ubuntu, Linux Mint:** grab the `.deb` from the
-[releases page](https://github.com/Epiklal/jellyfin-client-lite/releases)
-and run
+**Debian, Ubuntu, Linux Mint:** download
+[jellyfin-client-lite.deb](https://epiklal.github.io/jellyfin-client-lite/jellyfin-client-lite.deb)
+and open it, your software center (Discover, GNOME Software, ...) installs it.
+Or in a terminal:
 
 ```sh
-sudo apt install ./jellyfin-client-lite_*_all.deb
+wget -O /tmp/jellyfin-client-lite.deb https://epiklal.github.io/jellyfin-client-lite/jellyfin-client-lite.deb
+sudo apt install /tmp/jellyfin-client-lite.deb
 ```
 
-This pulls in mpv and the Python packages and adds "Jellyfin Client Lite"
-to your app menu. Run it from there or type `jellyfin-client-lite`.
+That's all, now start "Jellyfin Client Lite" from your app menu or type
+`jellyfin-client-lite`. It pulls in mpv and the Python packages, and it adds
+its own APT source: new versions arrive with your normal system updates
+(Discover, `apt upgrade`, ...) and it shows up in Discover's search. Coming
+from 0.3.2 or older? Install it this way once, from then on it updates itself.
+To remove it including the APT source: `sudo apt purge jellyfin-client-lite`.
 
 Older versions (like Ubuntu 24.04 or Mint 22) ship a Textual that's too old,
 so on those the first start downloads a current one from PyPI into
@@ -304,6 +310,12 @@ They need neither mpv nor a Jellyfin server.
 
 The package ends up in `dist/`.
 
+Releasing a new version: put it into `jfclite/__init__.py` and under
+`<releases>` in `packaging/io.github.epiklal.jellyfin_client_lite.metainfo.xml`,
+commit, then `git tag v<version> && git push --tags`. The release workflow
+builds the `.deb`, creates the GitHub release and updates the APT source on
+GitHub Pages (signed with the `APT_SIGNING_KEY` secret).
+
 ## Credits
 
 The look is borrowed from [jellyfin-tui](https://github.com/dhonus/jellyfin-tui),
@@ -311,4 +323,8 @@ which is the one to use if you want a full-featured client.
 
 ## License
 
-GPL-3.0, see [LICENSE](LICENSE).
+Apache-2.0, see [LICENSE](LICENSE). You can use, change, share and sell it,
+also as part of your own project. The one thing you have to do: keep the
+[NOTICE](NOTICE) file, which links back here, with every copy you pass on.
+
+Versions up to 0.3.2 were released under GPL-3.0.

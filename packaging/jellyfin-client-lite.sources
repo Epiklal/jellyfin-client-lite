@@ -1,0 +1,8 @@
+# Paketquelle von jellyfin-client-lite: darüber kommen Updates automatisch,
+# zusammen mit allen anderen Updates des Systems (Discover, apt upgrade, ...).
+# Kam mit dem Paket - "sudo apt purge jellyfin-client-lite" entfernt sie wieder.
+Types: deb
+URIs: https://epiklal.github.io/jellyfin-client-lite/apt
+Suites: stable
+Components: main
+Signed-By: /usr/share/keyrings/jellyfin-client-lite-archive.gpg

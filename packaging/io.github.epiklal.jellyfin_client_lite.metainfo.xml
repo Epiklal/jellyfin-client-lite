@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Beschreibung für Software-Center wie KDE Discover und GNOME Software.
+     Bei jeder neuen Version oben unter <releases> eintragen - build-deb.sh
+     bricht sonst ab. -->
+<component type="desktop-application">
+  <id>io.github.epiklal.jellyfin_client_lite</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+
+  <name>Jellyfin Client Lite</name>
+  <summary>Tiny terminal music player for your Jellyfin library</summary>
+  <summary xml:lang="de">Kleiner Terminal-Musikplayer für deine Jellyfin-Bibliothek</summary>
+
+  <developer id="io.github.epiklal">
+    <name>ketchupboy</name>
+  </developer>
+
+  <description>
+    <p>
+      Start it and it shuffles your whole Jellyfin music library in the
+      terminal. Playback is done by mpv and the files are streamed as they
+      are, without transcoding, so it stays light on your PC and your server.
+    </p>
+    <p xml:lang="de">
+      Starten, und es spielt deine ganze Jellyfin-Musikbibliothek zufällig im
+      Terminal ab. Die Wiedergabe übernimmt mpv, die Dateien kommen
+      unverändert ohne Umwandeln, das schont PC und Server.
+    </p>
+    <ul>
+      <li>Media keys and the desktop media widget work (with mpv-mpris)</li>
+      <li xml:lang="de">Medientasten und das Medien-Widget des Desktops funktionieren (mit mpv-mpris)</li>
+      <li>Search, album view, cover art and lyrics from your server</li>
+      <li xml:lang="de">Suche, Album-Ansicht, Cover und Songtexte vom Server</li>
+      <li>Tells your server what is playing, so play counts and statistics stay up to date</li>
+      <li xml:lang="de">Meldet dem Server, was läuft – Wiedergabezahlen und Statistik bleiben aktuell</li>
+      <li>Optionally shows what you are listening to in Discord</li>
+      <li xml:lang="de">Zeigt auf Wunsch in Discord an, was du hörst</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">jellyfin-client-lite.desktop</launchable>
+  <provides>
+    <binary>jellyfin-client-lite</binary>
+  </provides>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <keywords>
+    <keyword>jellyfin</keyword>
+    <keyword>music</keyword>
+    <keyword>player</keyword>
+    <keyword>terminal</keyword>
+    <keyword>shuffle</keyword>
+    <keyword xml:lang="de">Musik</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/Epiklal/jellyfin-client-lite</url>
+  <url type="bugtracker">https://github.com/Epiklal/jellyfin-client-lite/issues</url>
+  <url type="vcs-browser">https://github.com/Epiklal/jellyfin-client-lite</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Shuffling a library, with the queue and lyrics on the side</caption>
+      <image>https://epiklal.github.io/jellyfin-client-lite/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.3.3" date="2026-11-12">
+      <description>
+        <p>Reports playback to the Jellyfin server, installs an APT source for automatic updates, and is now licensed under Apache-2.0.</p>
+      </description>
+    </release>
+    <release version="0.3.2" date="2026-10-31"/>
+    <release version="0.3.1" date="2026-10-31"/>
+    <release version="0.3.0" date="2026-10-30"/>
+    <release version="0.2.0" date="2026-09-30"/>
+  </releases>
+</component>

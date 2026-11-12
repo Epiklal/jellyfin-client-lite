@@ -8,9 +8,14 @@ Recommends: mpv-mpris, playerctl, python3-pil
 Conflicts: jellyfin-tui-lite
 Replaces: jellyfin-tui-lite
 Maintainer: ketchupboy
+Homepage: https://github.com/Epiklal/jellyfin-client-lite
 Description: tiny terminal music player for Jellyfin
  Shuffles your whole Jellyfin music library in the terminal. Playback is
  done by mpv without transcoding, so it stays light on CPU and RAM.
  .
  With mpv-mpris installed, media keys and the desktop's media widget work.
- Can optionally show what you are listening to in Discord.
+ Reports playback to the server (play counts, statistics) and can
+ optionally show what you are listening to in Discord.
+ .
+ Installs its own APT source, so updates arrive with the normal system
+ updates.
