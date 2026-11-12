@@ -25,6 +25,9 @@ interface plus ~70 MB for mpv, and about 0.3 % of one CPU core while playing.
 - remembers your library, so after the first run it starts in under a second
   and only reloads when something changed on the server
 - can show what you're listening to in Discord (optional)
+- tells your server what's playing, like the official apps do: it shows up
+  under active devices in the dashboard, play counts and "recently played"
+  stay up to date, and plugins like Playback Reporting count it
 - shows the cover next to the track name and the lyrics stored on your
   server (synced lyrics highlight the current line); both can be switched off
 - search (`/`) across title, artist and album, and a settings dialog (`s`)
@@ -157,7 +160,8 @@ Press `s` in the player, or edit the config:
 "autoplay": true,
 "start_mode": "shuffle",
 "show_cover": true,
-"show_lyrics": true
+"show_lyrics": true,
+"report_playback": true
 ```
 
 - `language`: `"auto"` (system language), `"en"` or `"de"`. Applies from the
@@ -168,6 +172,10 @@ Press `s` in the player, or edit the config:
   your Jellyfin server (it has to have them); the cover needs Pillow
   (`pip install pillow`, the `.deb` recommends `python3-pil`) and a terminal
   with true color.
+- `report_playback`: tell the server what's playing (*Report playback to
+  Jellyfin*). That's a small request when a track starts, ends, is paused or
+  seeked, and every 10 seconds in between. Turn it off if you don't want your
+  listening in the server's history and statistics.
 - `start_mode`: `"shuffle"` or `"sorted"` (by artist, album, track number) for
   the order the list has at startup. `r` always reshuffles. Shuffling spreads
   each artist across the whole list, so they don't come up several times in a

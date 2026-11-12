@@ -291,6 +291,41 @@ def logged_in_client(responses=None):
     return client, session
 
 
+
+def test_playback_reports_go_to_the_session_endpoints():
+    ok = FakeResponse(204)
+    client, session = logged_in_client(
+        {"/Sessions/Playing": ok, "/Sessions/Playing/Progress": ok, "/Sessions/Playing/Stopped": ok}
+    )
+    client.report_playing("t1", 0.0, False, "s1")
+    client.report_progress("t1", 12.5, True, "s1", "pause")
+    client.report_stopped("t1", 180.0, "s1")
+    assert [c[1] for c in session.calls] == [
+        "/Sessions/Playing",
+        "/Sessions/Playing/Progress",
+        "/Sessions/Playing/Stopped",
+    ]
+    playing, progress, stopped = (c[2]["json"] for c in session.calls)
+    assert playing["ItemId"] == "t1" and playing["PlaySessionId"] == "s1"
+    assert playing["PlayMethod"] == "DirectPlay" and playing["IsPaused"] is False
+    assert progress["PositionTicks"] == 125_000_000
+    assert progress["IsPaused"] is True and progress["EventName"] == "pause"
+    assert stopped["PositionTicks"] == 1_800_000_000 and "IsPaused" not in stopped
+    # Kurzes Zeitlimit: ein toter Server hält das Beenden nicht lange auf
+    assert all(c[2]["timeout"] <= 3 for c in session.calls)
+
+
+def test_playback_report_errors_are_raised():
+    client, session = logged_in_client({"/Sessions/Playing": FakeResponse(401)})
+    with pytest.raises(requests.HTTPError):
+        client.report_playing("t1", 0.0, False, "s1")
+
+
+def test_negative_position_is_reported_as_zero():
+    client, session = logged_in_client({"/Sessions/Playing/Stopped": FakeResponse(204)})
+    client.report_stopped("t1", -0.3, "s1")
+    assert session.calls[0][2]["json"]["PositionTicks"] == 0
+
 def test_fetch_all_tracks_reads_every_page(cache_path):
     pages = iter(
         [

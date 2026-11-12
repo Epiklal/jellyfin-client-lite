@@ -247,11 +247,14 @@ def main() -> None:
             config["discord_client_id"], cover_base_url=config.get("public_url")
         )
 
+    from jfclite.reporting import PlaybackReporter
+
     app = JellyfinClientLite(
         client,
         presence=presence,
         config=config,
         save_config=lambda: save_config(config_path, config),
+        reporter=PlaybackReporter(client),
     )
     try:
         app.run()

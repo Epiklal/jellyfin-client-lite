@@ -9,5 +9,6 @@
   "show_lyrics": true,
   "discord_client_id": "",
   "discord_presence": true,
+  "report_playback": true,
   "public_url": ""
 }

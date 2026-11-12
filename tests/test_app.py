@@ -66,6 +66,22 @@ class FakePresence:
         pass
 
 
+class FakeReporter:
+    def __init__(self):
+        self.updates = []
+        self.stops = 0
+        self.closed = False
+
+    def update(self, track_id, position, paused):
+        self.updates.append((track_id, paused))
+
+    def stop(self):
+        self.stops += 1
+
+    def close(self):
+        self.closed = True
+
+
 class FakeClient:
     def __init__(self, tracks):
         self.tracks = tracks
@@ -99,12 +115,14 @@ def fake_player(monkeypatch):
     monkeypatch.setattr(app_module, "MPVPlayer", FakePlayer)
 
 
-def run_app(scenario, tracks=TRACKS, config=None, save_config=None, size=(80, 24), presence=None):
+def run_app(
+    scenario, tracks=TRACKS, config=None, save_config=None, size=(80, 24), presence=None, reporter=None
+):
     """Startet die App headless, wartet auf die Bibliothek und führt `scenario` aus."""
 
     async def main():
         settings = {"autoplay": False, "start_mode": "sorted", **(config or {})}
-        app = JellyfinClientLite(FakeClient(tracks), presence, settings, save_config)
+        app = JellyfinClientLite(FakeClient(tracks), presence, settings, save_config, reporter)
         async with app.run_test(size=size) as pilot:
             for _ in range(200):
                 if app.all_tracks:
@@ -413,3 +431,44 @@ def test_tick_during_shutdown_does_not_crash():
         app.set_interval(0.0005, app._tick)
 
     run_app(scenario)
+
+
+def test_playing_track_is_reported_to_jellyfin():
+    reporter = FakeReporter()
+
+    async def scenario(app, pilot):
+        app._play_track(0)
+        app._refresh_status()
+        assert reporter.updates[-1] == (app.queue[0].id, False)
+        app._halt()
+        assert reporter.stops >= 1
+
+    run_app(scenario, reporter=reporter)
+    assert reporter.closed  # beim Beenden: laufenden Titel als beendet melden
+
+
+def test_nothing_is_reported_while_switched_off():
+    reporter = FakeReporter()
+
+    async def scenario(app, pilot):
+        app._play_track(0)
+        app._refresh_status()
+        assert reporter.updates == []
+
+    run_app(scenario, config={"report_playback": False}, reporter=reporter)
+
+
+def test_switching_reporting_off_in_the_settings_ends_the_playback_report():
+    reporter = FakeReporter()
+
+    async def scenario(app, pilot):
+        app._play_track(0)
+        await pilot.press("s")
+        await pilot.pause()
+        app.screen.query_one("#set-report", Switch).value = False
+        app.screen.query_one("#save", Button).press()
+        await pilot.pause()
+        assert app.config["report_playback"] is False
+        assert reporter.stops == 1
+
+    run_app(scenario, reporter=reporter)

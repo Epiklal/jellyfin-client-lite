@@ -26,6 +26,7 @@ from textual.widgets import (
 from . import NAME
 from .client import JellyfinClient, Track, album_tracks, shuffled, sorted_tracks
 from .discord import DiscordPresence
+from .reporting import PlaybackReporter
 from .i18n import t
 from .player import MPVPlayer, replaygain_args
 from .widgets import (
@@ -218,6 +219,27 @@ SettingsScreen {{
     padding-top: 1;
 }}
 
+/* Schalter ohne Rahmen, eine Zeile hoch: mit allen fünf Schaltern passt der
+   Dialog sonst nicht mehr in 24 Zeilen */
+#settings .switch-row {{
+    margin-top: 1;
+}}
+
+#settings .switch-row Label {{
+    padding-top: 0;
+}}
+
+/* Ohne Rahmen fehlt die Fokus-Markierung des Schalters - dafür die Zeile hervorheben */
+#settings .switch-row:focus-within {{
+    background: {ACCENT} 25%;
+}}
+
+#settings Switch {{
+    height: 1;
+    border: none;
+    padding: 0;
+}}
+
 /* Breit genug, dass kein Eintrag umbricht: sonst passt der Dialog nicht in 24 Zeilen */
 #settings Select {{
     width: 36;
@@ -248,20 +270,23 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
     def compose(self) -> ComposeResult:
         with Vertical(id="settings"):
             yield Label(t("Einstellungen"), id="settings-title")
-            with Horizontal():
+            with Horizontal(classes="switch-row"):
                 yield Label(t("Autoplay (beim Start sofort abspielen)"))
                 yield Switch(self._settings["autoplay"], id="set-autoplay")
-            with Horizontal():
+            with Horizontal(classes="switch-row"):
                 yield Label(t("Cover neben dem Titel anzeigen"))
                 yield Switch(self._settings["show_cover"], id="set-cover")
-            with Horizontal():
+            with Horizontal(classes="switch-row"):
                 yield Label(t("Songtext anzeigen"))
                 yield Switch(self._settings["show_lyrics"], id="set-lyrics")
             # Ohne Application-ID wird ohnehin nichts an Discord gesendet
             if "discord_presence" in self._settings:
-                with Horizontal():
+                with Horizontal(classes="switch-row"):
                     yield Label(t("Aktuellen Titel in Discord teilen"))
                     yield Switch(self._settings["discord_presence"], id="set-discord")
+            with Horizontal(classes="switch-row"):
+                yield Label(t("Wiedergabe an Jellyfin melden"))
+                yield Switch(self._settings["report_playback"], id="set-report")
             with Horizontal():
                 yield Label(t("Beim Start: Reihenfolge"))
                 yield Select(
@@ -288,6 +313,7 @@ class SettingsScreen(ModalScreen[Optional[dict]]):
                 "autoplay": self.query_one("#set-autoplay", Switch).value,
                 "show_cover": self.query_one("#set-cover", Switch).value,
                 "show_lyrics": self.query_one("#set-lyrics", Switch).value,
+                "report_playback": self.query_one("#set-report", Switch).value,
                 "start_mode": self.query_one("#set-start-mode", Select).value,
                 "language": self.query_one("#set-language", Select).value,
             }
@@ -328,6 +354,7 @@ class JellyfinClientLite(App):
         presence: Optional[DiscordPresence] = None,
         config: Optional[dict] = None,
         save_config: Optional[Callable[[], None]] = None,
+        reporter: Optional[PlaybackReporter] = None,
     ):
         # ansi_color=True: Textual malt keine eigene RGB-Hintergrundfarbe über
         # den Screen, sondern lässt die Standardfarbe (und damit z.B. die
@@ -340,6 +367,7 @@ class JellyfinClientLite(App):
             super().__init__()
         self.client = client
         self.presence = presence
+        self.reporter = reporter
         self.player: Optional[MPVPlayer] = None
         self.queue: List[Track] = []
         self.current_index: int = -1
@@ -499,6 +527,8 @@ class JellyfinClientLite(App):
         now = time.monotonic()
         self._crashes = [c for c in self._crashes if now - c < 60] + [now]
         if len(self._crashes) > MAX_RESTARTS:
+            if self.reporter:
+                self.reporter.stop()
             self.main.query_one("#np-title", Static).update(t("⚠ mpv stürzt immer wieder ab"))
             self.main.query_one("#np-sub", Static).update(
                 t("Details stehen in {path}  —  Leertaste für neuen Versuch", path=log_path)
@@ -656,6 +686,11 @@ class JellyfinClientLite(App):
         self.main.query_one(VolumeBar).set_volume(self.player.volume)
         if self.presence and self.config.get("discord_presence", True) and self.current_index >= 0:
             self.presence.update(self.queue[self.current_index], pos, dur, paused)
+        if self.reporter and self.config.get("report_playback", True) and self.current_index >= 0:
+            if self._halted:
+                self.reporter.stop()
+            else:
+                self.reporter.update(self.queue[self.current_index].id, pos, paused)
 
     def _tick(self) -> None:
         # Beim Abbau sind die Widgets schon weg, der Timer läuft aber noch kurz weiter
@@ -982,6 +1017,7 @@ class JellyfinClientLite(App):
             "autoplay": self.config.get("autoplay", True),
             "show_cover": self.config.get("show_cover", True),
             "show_lyrics": self.config.get("show_lyrics", True),
+            "report_playback": self.config.get("report_playback", True),
             "start_mode": self.config.get("start_mode", "shuffle"),
             "language": self.config.get("language") if self.config.get("language") in ("de", "en") else "auto",
         }
@@ -995,6 +1031,8 @@ class JellyfinClientLite(App):
             # Vor dem Speichern: die Anzeige verschwindet auch, wenn das fehlschlägt
             if self.presence and not self.config.get("discord_presence", True):
                 self.presence.clear()
+            if self.reporter and not self.config.get("report_playback", True):
+                self.reporter.stop()
             try:
                 if self._save_config:
                     self._save_config()
@@ -1019,5 +1057,7 @@ class JellyfinClientLite(App):
     def on_unmount(self) -> None:
         if self.presence:
             self.presence.close()
+        if self.reporter:
+            self.reporter.close()
         if self.player:
             self.player.shutdown()

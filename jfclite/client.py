@@ -341,6 +341,41 @@ class JellyfinClient:
     def stream_headers(self) -> List[str]:
         return [f"Authorization: {_auth_header(self.api_key)}"]
 
+    # Wiedergabe melden: ohne diese drei Aufrufe weiß Jellyfin nicht, was
+    # läuft - keine Anzeige im Dashboard, keine Wiedergabezahl, kein "zuletzt
+    # gespielt", nichts in der Statistik (Playback Reporting). Aufgerufen nur
+    # aus dem Hintergrund-Thread in reporting.py; kurzes Zeitlimit, damit ein
+    # nicht erreichbarer Server das Beenden nicht lange aufhält.
+
+    def report_playing(self, track_id: str, position: float, paused: bool, session_id: str) -> None:
+        self._report("", track_id, position, session_id, IsPaused=paused, CanSeek=True)
+
+    def report_progress(
+        self, track_id: str, position: float, paused: bool, session_id: str, event: str = "timeupdate"
+    ) -> None:
+        """event: "timeupdate" (regelmäßig/Spulen), "pause" oder "unpause"."""
+        self._report(
+            "/Progress", track_id, position, session_id, IsPaused=paused, CanSeek=True, EventName=event
+        )
+
+    def report_stopped(self, track_id: str, position: float, session_id: str) -> None:
+        self._report("/Stopped", track_id, position, session_id)
+
+    def _report(self, path: str, track_id: str, position: float, session_id: str, **extra) -> None:
+        resp = self._session.post(
+            f"{self.server_url}/Sessions/Playing{path}",
+            json={
+                "ItemId": track_id,
+                "MediaSourceId": track_id,
+                "PositionTicks": int(max(0.0, position) * 10_000_000),
+                "PlayMethod": "DirectPlay",  # stream_url() streamt die Datei unverändert
+                "PlaySessionId": session_id,
+                **extra,
+            },
+            timeout=3,
+        )
+        resp.raise_for_status()
+
     def logout(self) -> None:
         """Meldet den Token beim Server ab - sonst bliebe nach jedem Start ein
         weiterer, unbegrenzt gültiger Token auf dem Server zurück."""

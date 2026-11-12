@@ -55,6 +55,7 @@ EN = {
     "Cover neben dem Titel anzeigen": "Show cover next to the title",
     "Songtext anzeigen": "Show lyrics",
     "Aktuellen Titel in Discord teilen": "Share current track on Discord",
+    "Wiedergabe an Jellyfin melden": "Report playback to Jellyfin",
     "Beim Start: Reihenfolge": "Order at startup",
     "Sprache": "Language",
     "Speichern": "Save",
